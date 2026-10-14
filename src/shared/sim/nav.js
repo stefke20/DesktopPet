@@ -2,15 +2,17 @@
 // Dijkstra planner over them. All distances in px; U = px per cat unit.
 import { clamp, intervalGap } from './geometry.js';
 
-export function motionParams(U) {
+export function motionParams(U, traits = {}) {
+  const t = { maxRise: 1.45, climbs: true, walk: 0.75, run: 2.1, climb: 0.55, ...traits };
   return {
     U,
-    walk: 0.75 * U,
-    run: 2.1 * U,
-    climb: 0.55 * U,
+    walk: t.walk * U,
+    run: t.run * U,
+    climb: t.climb * U,
+    climbs: !!t.climbs,
     gravity: 7.0 * U,
-    maxRise: 1.45 * U,       // how high the cat can jump
-    margin: 0.22 * U,        // keep landing/take-off away from edges
+    maxRise: t.maxRise * U,   // how high the animal can jump
+    margin: 0.22 * U,         // keep landing/take-off away from edges
   };
 }
 
@@ -39,7 +41,7 @@ export function jumpEdge(A, B, mp) {
 
 /** Climb edge A -> top surface B via a visible side wall of the same window. */
 export function climbEdge(A, B, walls, mp) {
-  if (B.kind !== 'top' || A.kind === 'wall') return null;
+  if (!mp.climbs || B.kind !== 'top' || A.kind === 'wall') return null;
   let best = null;
   for (const W of walls) {
     if (W.owner !== B.owner) continue;

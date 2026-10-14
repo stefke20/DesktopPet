@@ -4,15 +4,19 @@
 import { clamp, lerp, makeRng } from './geometry.js';
 import { motionParams, plan, arc } from './nav.js';
 import { IconField } from './icons.js';
+import species from '../species.cjs';
+const { SPECIES } = species;
 
 const TAU = Math.PI * 2;
 
 export class CatBrain {
-  constructor({ world, rng = makeRng(), U = 336, settings = {} }) {
+  constructor({ world, rng = makeRng(), U = 336, settings = {}, species: speciesId = 'cat' }) {
     this.world = world;
     this.rng = rng;
     this.U = U;
-    this.mp = motionParams(U);
+    this.species = speciesId;
+    this.traits = SPECIES[speciesId].traits;
+    this.mp = motionParams(U, this.traits);
     this.icons = new IconField(world, this.mp);
     this.settings = { playWithIcons: true, mud: true, perch: true, chase: true, sleep: true, ...settings };
 
@@ -47,9 +51,22 @@ export class CatBrain {
 
   // ------------------------------------------------------------------ config
   setScale(U) {
-    this.U = U; this.mp = motionParams(U); this.icons.setMotion(this.mp);
+    this.U = U; this.mp = motionParams(U, this.traits); this.icons.setMotion(this.mp);
     this.world.catH = 0.32 * U;
   }
+
+  /** Swap between the cat and the dog (different jumping / climbing / sounds). */
+  setSpecies(id, U = this.U) {
+    this.species = id;
+    this.traits = SPECIES[id].traits;
+    this.lookAt = null; this.petting = false;
+    this.setScale(U);
+    if (this.mode === 'ground' && this.support) this.pending = this.life();
+    else if (this.mode !== 'held') { this.rotZ = 0; this.wall = null; this.mode = 'air'; this.pending = this.fallRoutine(); }
+  }
+
+  get isDog() { return this.species === 'dog'; }
+  get voice() { return this.traits.sound; }
 
   get catH() { return 0.32 * this.U; }
   get dt() { return this._dt; }
@@ -182,12 +199,13 @@ export class CatBrain {
 
   // ------------------------------------------------------------------ animation commands
   setAnim(state, params = {}, extra = {}) {
+    if (this.isDog && state === 'groom') state = 'sit';   // dogs just sit and pant
     this.anim = { state, params };
     Object.assign(this.cmd, extra);
   }
 
   get descriptor() {
-    const yawByState = { walk: 0.3, stand: 0.5, sit: 0.7, loaf: 0.55, sleep: 0.5, pet: 1.15, groom: 0.8, jump: 0.2, crouch: 0.3, swat: 0.35, climb: 0.15, hang: 0.5, fall: 0.3, stretch: 0.45, yawn: 0.6, land: 0.3 };
+    const yawByState = { sniff: 0.3, bark: 0.6, walk: 0.3, stand: 0.5, sit: 0.7, loaf: 0.55, sleep: 0.5, pet: 1.15, groom: 0.8, jump: 0.2, crouch: 0.3, swat: 0.35, climb: 0.15, hang: 0.5, fall: 0.3, stretch: 0.45, yawn: 0.6, land: 0.3 };
     const a = this.anim;
     return {
       state: a.state, params: a.params,
@@ -431,12 +449,12 @@ export class CatBrain {
 
   *pokeRoutine() {
     const wasAsleep = this.anim.state === 'sleep' || this.anim.state === 'loaf';
-    this.events.push({ type: 'meow' });
+    this.events.push({ type: this.isDog ? 'bark' : 'meow' });
     if (wasAsleep) {
       yield* this.wait(0.5, 'stand');
       yield* this.wait(1.6, 'stretch', { duration: 1.6 });
     } else {
-      yield* this.wait(0.9, 'yawn', { duration: 0.9 });
+      if (this.isDog) yield* this.wait(1.1, 'bark'); else yield* this.wait(0.9, 'yawn', { duration: 0.9 });
     }
   }
 
@@ -476,12 +494,12 @@ export class CatBrain {
     const options = [];
     options.push({ id: 'idle', w: 2.2 });
     options.push({ id: 'wander', w: 2.0 });
-    if (hasPerch && this.cool.perch <= 0) options.push({ id: 'perch', w: 1.8 + (this.world.fields().length ? 1.2 : 0) });
+    if (hasPerch && this.cool.perch <= 0) options.push({ id: 'perch', w: (1.8 + (this.world.fields().length ? 1.2 : 0)) * this.traits.perchWeight });
     if (this.settings.sleep && this.energy < 0.55) options.push({ id: 'nap', w: (0.55 - this.energy) * 9 });
     if (this.settings.playWithIcons && this.cool.icons <= 0 && this.iconCandidates().length) options.push({ id: 'icons', w: 2.6 });
     if (this.settings.mud && this.cool.mud <= 0 && this.mud <= 0) options.push({ id: 'mud', w: 0.9 });
     const c = this.world.cursor;
-    if (this.settings.chase && this.cool.chase <= 0 && Math.hypot(c.vx, c.vy) > 150 && Math.hypot(c.x - this.x, c.y - this.y) < 900) options.push({ id: 'chase', w: 3.0 });
+    if (this.settings.chase && this.cool.chase <= 0 && Math.hypot(c.vx, c.vy) > 150 && Math.hypot(c.x - this.x, c.y - this.y) < 900) options.push({ id: 'chase', w: 3.0 * this.traits.playful });
     const pick = r.weighted(options, (o) => o.w - (o.id === this.lastActivity ? 0.8 : 0));
     if (!pick) { yield* this.wait(1, 'stand'); return; }
     this.lastActivity = pick.id;
@@ -501,7 +519,7 @@ export class CatBrain {
 
   *idle() {
     const r = this.rng;
-    const kind = r.pick(['sit', 'sit', 'stand', 'groom', 'stretch', 'yawn']);
+    const kind = r.pick(this.isDog ? ['sit', 'sit', 'stand', 'sniff', 'stretch', 'yawn', 'bark'] : ['sit', 'sit', 'stand', 'groom', 'stretch', 'yawn', 'sniff']);
     switch (kind) {
       case 'sit': {
         const total = r.range(5, 12);
@@ -514,8 +532,30 @@ export class CatBrain {
       case 'stand': yield* this.wait(r.range(3, 7), 'stand', { tail: r.pick(['rest', 'up', 'question']) }); break;
       case 'groom': yield* this.wait(1.0, 'sit'); yield* this.wait(r.range(3, 6), 'groom'); break;
       case 'stretch': yield* this.wait(2.4, 'stretch', { duration: 2.4 }); break;
+      case 'sniff': yield* this.sniffAround(); break;
+      case 'bark': { this.events.push({ type: 'bark' }); yield* this.wait(1.6, 'bark'); yield* this.wait(1, 'stand'); break; }
       case 'yawn': yield* this.wait(1.0, 'sit'); yield* this.wait(1.9, 'yawn', { duration: 1.9, sit: true }); break;
       default: break;
+    }
+  }
+
+  /** Pad slowly along the surface with the nose to the ground. */
+  *sniffAround() {
+    const s = this.support;
+    if (!s) return;
+    const lo = s.x1 + 0.1 * this.U, hi = s.x2 - 0.1 * this.U;
+    if (hi - lo < 0.6 * this.U) return;
+    for (let leg = 0; leg < 2 && this.mode === 'ground'; leg++) {
+      const tx = clamp(this.x + this.rng.pick([-1, 1]) * this.rng.range(0.8, 2.2) * this.U, lo, hi);
+      const dir = Math.sign(tx - this.x) || this.facing;
+      if (dir !== this.facing) yield* this.turn(dir);
+      const sp = 0.32 * this.U;
+      while (Math.abs(tx - this.x) > 4 && this.mode === 'ground' && this.support) {
+        this.x += dir * Math.min(sp * this.dt, Math.abs(tx - this.x));
+        this.setAnim('sniff', {}, { speed: sp });
+        yield;
+      }
+      yield* this.wait(this.rng.range(0.4, 1.0), 'sniff');
     }
   }
 
@@ -527,7 +567,8 @@ export class CatBrain {
     if (hi - lo < 0.5 * this.U) { yield* this.wait(1, 'stand'); return; }
     let tx = this.rng.range(lo, hi);
     for (let i = 0; i < 6 && Math.abs(tx - this.x) < 0.9 * this.U; i++) tx = this.rng.range(lo, hi);
-    yield* this.walkTo(tx, { run: this.rng.chance(0.2) });
+    if (this.isDog && this.rng.chance(0.35)) yield* this.sniffAround();
+    yield* this.walkTo(tx, { run: this.rng.chance(this.isDog ? 0.4 : 0.2) });
     this.energy = clamp(this.energy - 0.02, 0, 1);
     yield* this.wait(this.rng.range(0.6, 2), 'stand');
   }
@@ -587,7 +628,7 @@ export class CatBrain {
 
   *nap() {
     // Prefer a cosy perch half the time.
-    if (this.settings.perch && this.rng.chance(0.5)) {
+    if (this.settings.perch && this.traits.napsOnPerch && this.rng.chance(0.5)) {
       const t = this.pickPerch();
       if (t) { const ok = yield* this.goTo(t.id, (t.x1 + t.x2) / 2); if (!ok) return; }
     }
@@ -610,6 +651,7 @@ export class CatBrain {
     this.cool.chase = this.rng.range(45, 90);
     const end = this.time + this.rng.range(7, 14);
     this.events.push({ type: 'chase' });
+    if (this.isDog) this.events.push({ type: 'bark' });
     while (this.time < end && this.mode === 'ground') {
       const c = this.world.cursor;
       const s = this.support;
@@ -668,6 +710,7 @@ export class CatBrain {
       if (this.icons.has(ic.name)) continue;
       const rect = { x: ic.ix ?? ic.x, y: ic.iy ?? ic.y, w: ic.iw ?? ic.w, h: ic.ih ?? ic.h };
       if (this.world.rectCovered(rect)) continue;
+      if (!this.mp.climbs && this.world.floorY - (rect.y + rect.h / 2) > this.mp.maxRise * 0.95) continue;   // too high to reach
       out.push(ic);
     }
     return out;
@@ -786,7 +829,7 @@ export class CatBrain {
       this.lookAt = null;
       return hit;
     }
-    if (h <= 1.25 * this.U) {
+    if (h <= 0.86 * this.mp.maxRise) {
       yield* this.walkTo(clamp(target.x - dir * 0.2 * this.U, stand.x1 + 6, stand.x2 - 6), { run: false });
       if (this.mode !== 'ground') return false;
       if (dir !== this.facing) yield* this.turn(dir);
@@ -794,6 +837,7 @@ export class CatBrain {
       launch = 'ground';
     } else {
       // too high to jump: climb the screen edge next to the icons, then leap off the wall
+      if (!this.mp.climbs) return false;
       const wall = this.world.getSurface(cx < this.world.width / 2 ? 'wall:screen:L' : 'wall:screen:R');
       const floor = this.world.getSurface('floor');
       if (!wall || !floor) return false;

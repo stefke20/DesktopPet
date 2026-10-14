@@ -1,7 +1,6 @@
 // Build the skinned cat mesh from the SDF: surface nets -> projection ->
 // smoothing -> normals -> skin weights -> per-vertex fur attributes.
-import { catSdf, prepareBounds, BOUNDS } from './shape.js';
-import { boneSegments } from './rig-def.js';
+import { makeShape } from './shape.js';
 
 function surfaceNets(f, nx, ny, nz, lo, h) {
   const idx = (i, j, k) => i + nx * (j + ny * k);
@@ -58,19 +57,19 @@ function surfaceNets(f, nx, ny, nz, lo, h) {
   return { verts: new Float32Array(verts), tris: new Uint32Array(tris) };
 }
 
-function gradient(x, y, z, e = 0.0015) {
-  const gx = catSdf(x + e, y, z) - catSdf(x - e, y, z);
-  const gy = catSdf(x, y + e, z) - catSdf(x, y - e, z);
-  const gz = catSdf(x, y, z + e) - catSdf(x, y, z - e);
+function gradient(sdf, x, y, z, e = 0.0015) {
+  const gx = sdf(x + e, y, z) - sdf(x - e, y, z);
+  const gy = sdf(x, y + e, z) - sdf(x, y - e, z);
+  const gz = sdf(x, y, z + e) - sdf(x, y, z - e);
   const l = Math.hypot(gx, gy, gz) || 1;
   return [gx / l, gy / l, gz / l];
 }
 
-function project(verts, iterations = 2) {
+function project(sdf, verts, iterations = 2) {
   for (let it = 0; it < iterations; it++)
     for (let i = 0; i < verts.length; i += 3) {
-      const d = catSdf(verts[i], verts[i + 1], verts[i + 2]);
-      const g = gradient(verts[i], verts[i + 1], verts[i + 2]);
+      const d = sdf(verts[i], verts[i + 1], verts[i + 2]);
+      const g = gradient(sdf, verts[i], verts[i + 1], verts[i + 2]);
       verts[i] -= g[0] * d; verts[i + 1] -= g[1] * d; verts[i + 2] -= g[2] * d;
     }
 }
@@ -104,10 +103,12 @@ function distSeg(p, a, b) {
   return Math.hypot(apx - abx * t, apy - aby * t, apz - abz * t);
 }
 
-export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
+export function generateCat({ species = 'cat', voxel = 0.0055, log = () => {} } = {}) {
   const t0 = Date.now();
-  prepareBounds();
-  const lo = BOUNDS.lo, hi = BOUNDS.hi;
+  const shape = makeShape(species);
+  const sdf = shape.sdf;
+  shape.prepare();
+  const lo = shape.bounds.lo, hi = shape.bounds.hi;
   const nx = Math.ceil((hi[0] - lo[0]) / voxel) + 2;
   const ny = Math.ceil((hi[1] - lo[1]) / voxel) + 2;
   const nz = Math.ceil((hi[2] - lo[2]) / voxel) + 2;
@@ -115,12 +116,12 @@ export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
   for (let k = 0; k < nz; k++)
     for (let j = 0; j < ny; j++)
       for (let i = 0; i < nx; i++)
-        f[i + nx * (j + ny * k)] = catSdf(lo[0] + i * voxel, lo[1] + j * voxel, lo[2] + k * voxel);
+        f[i + nx * (j + ny * k)] = sdf(lo[0] + i * voxel, lo[1] + j * voxel, lo[2] + k * voxel);
   log(`field ${nx}x${ny}x${nz} in ${Date.now() - t0}ms`);
 
   let { verts, tris } = surfaceNets(f, nx, ny, nz, lo, voxel);
   smooth(verts, tris, 3, 0.5);
-  project(verts, 3);
+  project(sdf, verts, 3);
   log(`mesh ${verts.length / 3} verts, ${tris.length / 3} tris in ${Date.now() - t0}ms`);
 
   // Orientation check: face normals should agree with the SDF gradient.
@@ -130,7 +131,7 @@ export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
     const e1 = [verts[b] - verts[a], verts[b + 1] - verts[a + 1], verts[b + 2] - verts[a + 2]];
     const e2 = [verts[c] - verts[a], verts[c + 1] - verts[a + 1], verts[c + 2] - verts[a + 2]];
     const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    const g = gradient(verts[a], verts[a + 1], verts[a + 2]);
+    const g = gradient(sdf, verts[a], verts[a + 1], verts[a + 2]);
     agree += n[0] * g[0] + n[1] * g[1] + n[2] * g[2] > 0 ? 1 : -1;
   }
   if (agree < 0) for (let t = 0; t < tris.length; t += 3) { const x = tris[t + 1]; tris[t + 1] = tris[t + 2]; tris[t + 2] = x; }
@@ -139,12 +140,12 @@ export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
   const normals = new Float32Array(n * 3);
   const skinIndex = new Uint16Array(n * 4);
   const skinWeight = new Float32Array(n * 4);
-  const segs = boneSegments();
+  const segs = shape.rig.boneSegments();
   const tau = 0.011;
 
   for (let v = 0; v < n; v++) {
     const p = [verts[v * 3], verts[v * 3 + 1], verts[v * 3 + 2]];
-    normals.set(gradient(p[0], p[1], p[2]), v * 3);
+    normals.set(gradient(sdf, p[0], p[1], p[2]), v * 3);
 
     // skin weights: nearest bones by distance to the bone *surface*, soft-blended
     const ds = segs.map((sg) => distSeg(p, sg.a, sg.b) - sg.r);

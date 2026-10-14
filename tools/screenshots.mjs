@@ -14,7 +14,7 @@ await page.goto(`http://127.0.0.1:${srv.port}/harness.html`);
 await page.waitForFunction(() => window.harness && window.harness.ready, null, { timeout: 60000 });
 const poses = JSON.parse(process.argv[2] || '[{"name":"side","yaw":0},{"name":"three-quarter","yaw":-0.6},{"name":"front","yaw":-1.5}]');
 for (const p of poses) {
-  await page.evaluate((p) => { const h = window.harness; h.view.orient.rotation.y = p.yaw; if (p.layers) h.view.setFurQuality(p.layers); else h.view.setFurQuality(20); h.view.render(); }, p);
+  await page.evaluate((p) => { const h = window.harness; h.char.orient.rotation.y = p.yaw; h.view.render(); }, p);
   await page.screenshot({ path: path.join(out, `cat-${p.name}.png`), clip: p.clip || undefined });
   console.log('shot', p.name);
 }

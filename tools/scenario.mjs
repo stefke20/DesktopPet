@@ -17,6 +17,7 @@ if (process.env.SEED) await page.addInitScript(`(() => { let a = ${Number(proces
 await page.goto(`http://127.0.0.1:${srv.port}/index.html`);
 await page.waitForFunction(() => window.app, null, { timeout: 60000 });
 await page.evaluate(() => { window.app.running = false; });
+if (process.env.SPECIES) await page.evaluate((sp) => window.app.applySettings({ species: sp }), process.env.SPECIES);
 
 const shot = async (label) => { await page.evaluate(() => window.app.tick(0.001, true)); await page.screenshot({ path: path.join(outDir, `${label}.png`) }); };
 const adv = (sec, step = 1 / 60) => page.evaluate(([s, st]) => { for (let t = 0; t < s; t += st) window.app.tick(st, false); }, [sec, step]);
@@ -37,7 +38,7 @@ const scenarios = {
         modes[b.mode] = (modes[b.mode] || 0) + 1;
         if (b.mode === 'air') { air += 1 / 30; maxAir = Math.max(maxAir, air); } else air = 0;
         for (const n of ['head', 'pelvis', 'fpL', 'hmR', 'tail5']) {
-          const q = a.view.bones[n].quaternion, p = a.view.bones[n].position;
+          const q = a.char.bones[n].quaternion, p = a.char.bones[n].position;
           if (![q.x, q.y, q.z, q.w, p.x, p.y, p.z].every(Number.isFinite)) bad.push(`${n}@${t.toFixed(1)}`);
         }
         if (!Number.isFinite(b.x) || b.y > 700 || b.x < -5 || b.x > 1285) bad.push(`pos ${b.x.toFixed(0)},${b.y.toFixed(0)}@${t.toFixed(1)} mode=${b.mode} anim=${b.anim.state} act=${b.lastActivity} owner=${b.attach.owner} wall=${b.wall && b.wall.id} rotZ=${b.rotZ.toFixed(2)}`);
@@ -50,7 +51,7 @@ const scenarios = {
     // keep the cat still on the floor so we can poke at it
     await page.evaluate(() => { const b = window.app.brain; b.x = 640; b.y = 680; b.mode = 'ground'; b.attachTo('floor'); b.task = (function* () { while (true) { b.setAnim('stand'); yield; } })(); });
     await adv(0.5);
-    const head = await page.evaluate(() => { const a = window.app; const v = a.view.bones.chest.getWorldPosition(new a._tmp.constructor()); return { x: a.brain.x + v.x * a.S, y: a.brain.y - v.y * a.S }; });
+    const head = await page.evaluate(() => { const a = window.app; const v = a.char.bones.chest.getWorldPosition(new a._tmp.constructor()); return { x: a.brain.x + v.x * a.S, y: a.brain.y - v.y * a.S }; });
     console.log('chest at', JSON.stringify(head));
     // 1) hover slowly -> petting
     for (let k = 0; k < 90; k++) { await page.evaluate(([x, y, k]) => { window.__fake.cursor(x + Math.sin(k / 8) * 6, y); window.app.tick(1 / 60, false); }, [head.x, head.y, k]); }
@@ -70,7 +71,7 @@ const scenarios = {
     console.log('landed:', JSON.stringify(await info()));
     // 3) quick click -> meow
     await page.evaluate(() => { const b = window.app.brain; b.task = (function* () { while (true) { b.setAnim('stand'); yield; } })(); });
-    const p2 = await page.evaluate(() => { const a = window.app; const v = a.view.bones.chest.getWorldPosition(new a._tmp.constructor()); return { x: a.brain.x + v.x * a.S, y: a.brain.y - v.y * a.S }; });
+    const p2 = await page.evaluate(() => { const a = window.app; const v = a.char.bones.chest.getWorldPosition(new a._tmp.constructor()); return { x: a.brain.x + v.x * a.S, y: a.brain.y - v.y * a.S }; });
     await page.evaluate(([x, y]) => { window.__fake.cursor(x, y); window.app.tick(1 / 60, false); }, [p2.x, p2.y]);
     await page.mouse.move(p2.x, p2.y); await page.mouse.down(); await page.mouse.up();
     await adv(0.3);

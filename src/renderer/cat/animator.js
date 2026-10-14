@@ -5,6 +5,14 @@ import { newPose, copyPose, dampPose, STAND_FEET, clonePose } from './pose.js';
 import { CatRig } from './rig.js';
 
 const TAU = Math.PI * 2;
+
+// Dog tails rest pointing up; these bend them down for relaxed / sitting poses.
+const DOG_TAIL = {
+  up: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  mid: [0.6, 0, 0.28, 0, 0.12, 0, 0.05, 0, 0, 0, 0, 0],
+  low: [1.0, 0, 0.4, 0, 0.25, 0, 0.15, 0, 0.1, 0, 0.05, 0],
+};
+const DOG_TAIL_MAP = { rest: 'mid', up: 'up', question: 'up', puff: 'up', wrap: 'mid', curl: 'mid', low: 'mid', hang: 'low' };
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const lerp = (a, b, t) => a + (b - a) * t;
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -24,6 +32,9 @@ const TAIL = {
 export class CatAnimator {
   constructor(view) {
     this.view = view;
+    this.dog = !!view.dog;
+    this.heat = 0;     // exertion: dogs pant when it is high
+    this.happy = 0.2;  // dogs wag harder when happy
     this.rig = new CatRig(view);
     this.cur = newPose();
     this.target = newPose();
@@ -57,7 +68,12 @@ export class CatAnimator {
 
   // ---------------------------------------------------------------- helpers
   _tail(p, shape, wave = 0, waveSpeed = 1.4, lateral = 1) {
-    const base = TAIL[shape] || TAIL.rest;
+    let base;
+    if (this.dog) {
+      base = DOG_TAIL[DOG_TAIL_MAP[shape] || 'mid'];
+      wave = wave * (1 + 2.4 * this.happy) + 0.1 + 0.55 * this.happy;   // dogs wag
+      waveSpeed *= 1 + 1.6 * this.happy;
+    } else base = TAIL[shape] || TAIL.rest;
     for (let i = 0; i < 12; i++) p.tail[i] = base[i];
     if (wave) {
       for (let i = 0; i < 6; i++) {
@@ -70,6 +86,16 @@ export class CatAnimator {
 
   _ears(p, mode, t) {
     const set = (side, out, back, twist = 0) => { p['ear' + side][0] = out; p['ear' + side][1] = back; p['ear' + side][2] = twist; };
+    if (this.dog) {   // floppy ears: 'back' > 0 pins them back, < 0 lifts them forward
+      const flap = Math.sin(this.time * 11) * 0.22 * clamp(this.speed - 0.9, 0, 1);
+      switch (mode) {
+        case 'flat': set('L', 0.35, 0.7); set('R', 0.35, 0.7); break;
+        case 'back': set('L', 0.2, 0.35 + flap); set('R', 0.2, 0.35 + flap); break;
+        case 'alert': set('L', 0.05, -0.55); set('R', 0.05, -0.55); break;
+        default: set('L', 0.06, 0.05 + flap); set('R', 0.06, 0.05 + flap);
+      }
+      return;
+    }
     switch (mode) {
       case 'flat': set('L', 0.9, 1.0); set('R', 0.9, 1.0); break;
       case 'back': set('L', 0.4, 0.5); set('R', 0.4, 0.5); break;
@@ -291,6 +317,23 @@ export class CatAnimator {
         this.purr = 1;
         break;
       }
+      case 'sniff': { // nose to the ground, slowly padding along
+        this.state = 'walk'; this._applyAction(p, dt, ctx); this.state = 'sniff';
+        const sn = Math.sin(this.time * 13) * 0.05;
+        p.bodyY -= 0.012; p.ch[0] += 0.12; p.n1[0] += -0.42; p.n2[0] += -0.5; p.hd[0] += -0.38 + sn;
+        p.pupil = 0.6;
+        this._ears(p, 'alert', t);
+        break;
+      }
+      case 'bark': { // quick head jerks with the mouth open
+        const pulse = Math.max(0, Math.sin(this.time * 17)) ** 2;
+        p.ch[0] = -0.05 - 0.08 * pulse; p.n1[0] = 0.15 * pulse; p.n2[0] = 0.18 * pulse; p.hd[0] = 0.32 * pulse;
+        p.bodyY = 0.012 * pulse; p.mouth = 0.5 + 0.5 * pulse; p.eye = 1 - 0.3 * pulse; p.pupil = 0.7;
+        p.fL = [0.125 + 0.03 * pulse, 0, 0.042, 0]; p.fR = [0.125 + 0.03 * pulse, 0, -0.042, 0];
+        this._tail(p, 'up', 0.3, 1.0);
+        this._ears(p, 'alert', t);
+        break;
+      }
       case 'climb': { // body is rotated by the controller; feet cycle like a walk
         p.bodyY = -0.02; p.pitch = 0.05; p.ch[0] = 0.05;
         p.s1[1] = -0.05 * Math.sin(this.phase * TAU);
@@ -365,7 +408,7 @@ export class CatAnimator {
     this.events.length = 0;
     const speed = ctx.speed || 0;
     this.speed = speed;
-    const locomoting = (this.state === 'walk' || this.state === 'climb') && speed > 0.02;
+    const locomoting = (this.state === 'walk' || this.state === 'climb' || this.state === 'sniff') && speed > 0.02;
 
     // orientation first: the 3D heading turns *through* the camera, and some poses
     // (hanging) need "down" expressed in rig space
@@ -382,10 +425,19 @@ export class CatAnimator {
     this.down = this.down || new THREE.Vector3();
     this.down.set(0, -1, 0).transformDirection(o.matrixWorld.clone().invert());
 
+    // dog moods: exertion makes dogs pant, praise and play make them wag
+    this.heat = clamp(this.heat + (speed > 1.3 ? 0.55 : speed > 0.3 ? 0.12 : -0.07) * dt, 0, 1);
+    const happyGoal = { pet: 1, stretch: 0.9, swat: 0.7, bark: 0.8, crouch: 0.6, jump: 0.6, walk: speed > 1.3 ? 0.7 : 0.35, sit: 0.3, sleep: 0 }[this.state] ?? 0.25;
+    this.happy += (happyGoal - this.happy) * (1 - Math.exp(-3 * dt));
+
     const tgt = this.target;
     copyPose(tgt, newPose());
     this._applyAction(tgt, dt, ctx);
     this._overlays(tgt, dt, ctx);
+    if (this.dog && this.state !== 'sleep' && this.state !== 'bark' && this.state !== 'yawn') {
+      const pant = this.heat > 0.25 || this.state === 'pet' ? 0.3 + 0.55 * Math.max(this.heat, this.state === 'pet' ? 0.6 : 0) : 0;
+      if (pant > 0) tgt.mouth = Math.max(tgt.mouth, pant * (0.75 + 0.25 * Math.sin(this.time * 11)));
+    }
 
     // gait
     const runTarget = clamp((speed - 1.0) / 0.7, 0, 1);

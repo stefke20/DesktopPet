@@ -1,20 +1,9 @@
 // Applies a pose to the Three.js skeleton: FK for spine/neck/tail/ears, 2-bone
 // IK (plus a gliding scapula) for the legs.
 import * as THREE from 'three';
-import { BONES } from '../../shared/cat/rig-def.js';
 
 const V = (a) => new THREE.Vector3(a[0], a[1], a[2]);
-const def = Object.fromEntries(BONES.map((b) => [b.name, b]));
 const e = new THREE.Euler();
-
-// Child joint position for each bone (first child, or its end point).
-const childPos = {};
-for (const b of BONES) if (b.parent && !(b.parent in childPos)) childPos[b.parent] = b.pos;
-const restDir = (name) => {
-  const b = def[name];
-  const c = childPos[name] || b.end;
-  return V(c).sub(V(b.pos)).normalize();
-};
 
 function twoBone(H, W, l1, l2, pole, outKnee, outWrist) {
   const d = H.distanceTo(W);
@@ -32,6 +21,15 @@ function twoBone(H, W, l1, l2, pole, outKnee, outWrist) {
 
 export class CatRig {
   constructor(view) {
+    const BONES = view.def.BONES;
+    const def = Object.fromEntries(BONES.map((b) => [b.name, b]));
+    // Child joint position for each bone (first child, or its end point).
+    const childPos = {};
+    for (const b of BONES) if (b.parent && !(b.parent in childPos)) childPos[b.parent] = b.pos;
+    const restDir = (name) => {
+      const b = def[name];
+      return V(childPos[name] || b.end).sub(V(b.pos)).normalize();
+    };
     this.view = view;
     this.b = view.bones;
     this.rig = view.rig;
@@ -95,7 +93,9 @@ export class CatRig {
     for (const s of ['L', 'R']) {
       const ear = p['ear' + s];
       const sign = s === 'L' ? 1 : -1;
-      e.set(sign * ear[0], 0, -ear[1], 'XYZ');
+      // cat ears point up, dog ears hang down: the same "outward"/"back" angles flip sign
+      const ed = this.view.dog ? -1 : 1;
+      e.set(sign * ed * ear[0], 0, ed * ear[1], 'XYZ');
       b['ear' + s].quaternion.setFromEuler(e);
       b['ear' + s].rotateY(sign * ear[2]);
     }
@@ -152,6 +152,7 @@ export class CatRig {
 
     // ---- eyes / face ----
     const v = this.view;
+    v.setMouth(p.mouth);
     for (const side of ['L', 'R']) v.eyes[side].mat.uniforms.uBlink.value = 1 - p.eye;
     v.eyes.L.mat.uniforms.uPupil.value = v.eyes.R.mat.uniforms.uPupil.value = p.pupil;
     for (const side of ['L', 'R']) {

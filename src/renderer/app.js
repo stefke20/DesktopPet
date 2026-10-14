@@ -1,7 +1,8 @@
 // Ties the simulation to the screen: world sync from the native bridge, the
 // brain, the 3D cat, mud / props layers, input handling and icon hand-off.
 import * as THREE from 'three';
-import { CatView } from './cat/CatView.js';
+import { PetView } from './cat/PetView.js';
+import speciesData from '../shared/species.cjs';
 import { CatAnimator } from './cat/animator.js';
 import { STAND_FEET } from './cat/pose.js';
 import { World } from '../shared/sim/world.js';
@@ -11,26 +12,28 @@ import { MudLayer } from './overlay/mud.js';
 import { PropsLayer } from './overlay/props.js';
 import { CatSound } from './sound.js';
 
+const { SPECIES } = speciesData;
 const PX_PER_UNIT = 480;
 const CANVAS = 640;
 
 export class PetApp {
-  constructor({ host, catBuffer, display, settings, seed }) {
+  constructor({ host, models, display, settings, seed }) {
     this.host = host;
-    this.settings = { size: 0.7, coat: 'ginger', playWithIcons: true, mud: true, perch: true, chase: true, sleep: true, paused: false, ...settings };
+    this.settings = { size: 0.7, species: 'cat', coats: { cat: 'ginger', dog: 'golden' }, playWithIcons: true, mud: true, perch: true, chase: true, sleep: true, events: true, paused: false, ...settings };
+    if (!SPECIES[this.settings.species]) this.settings.species = 'cat';
     this.display = display;
     const W = display.width, H = display.height;
 
     this.mudLayer = new MudLayer(document.getElementById('mud'), W, H);
     this.props = new PropsLayer(document.getElementById('props'), W, H);
     this.catCanvas = document.getElementById('cat');
-    this.view = new CatView(this.catCanvas, catBuffer, { pxPerUnit: PX_PER_UNIT, size: CANVAS });
-    this.anim = new CatAnimator(this.view);
+    this.view = new PetView(this.catCanvas, models, { pxPerUnit: PX_PER_UNIT, size: CANVAS, species: this.settings.species });
+    this.anims = Object.fromEntries(Object.entries(this.view.characters).map(([id, ch]) => [id, new CatAnimator(ch)]));
     this.sound = new CatSound();
 
-    const U = PX_PER_UNIT * this.settings.size;
+    const U = PX_PER_UNIT * this.settings.size * SPECIES[this.settings.species].scale;
     this.world = new World({ width: W, height: H, floorY: display.floorY, catH: 0.32 * U });
-    this.brain = new CatBrain({ world: this.world, rng: makeRng(seed), U, settings: this.settings });
+    this.brain = new CatBrain({ world: this.world, rng: makeRng(seed), U, settings: this.settings, species: this.settings.species });
     this.applySettings(this.settings);
 
     this.cursor = { x: W / 2, y: H / 2 };
@@ -62,7 +65,9 @@ export class PetApp {
     requestAnimationFrame((t) => this.frame(t));
   }
 
-  get S() { return PX_PER_UNIT * this.settings.size; }
+  get S() { return PX_PER_UNIT * this.settings.size * SPECIES[this.settings.species].scale; }
+  get char() { return this.view.active; }
+  get anim() { return this.anims[this.settings.species]; }
 
   // ------------------------------------------------------------- host data
   onState(s) {
@@ -106,8 +111,16 @@ export class PetApp {
 
   applySettings(st) {
     Object.assign(this.settings, st);
-    const f = this.settings.size;
-    this.view.setCoat(this.settings.coat);
+    const id = SPECIES[this.settings.species] ? this.settings.species : 'cat';
+    this.settings.species = id;
+    const f = this.settings.size * SPECIES[id].scale;
+    if (this.view.species !== id) {
+      this.view.setSpecies(id);
+      this.anims[id].setState('stand');
+      this.brain.setSpecies(id, PX_PER_UNIT * f);
+      this.mudLayer.clear();
+    }
+    for (const [sp, ch] of Object.entries(this.view.characters)) ch.setCoat(this.settings.coats[sp]);
     this.view.setSizeFactor(f);
     this.brain.setScale(PX_PER_UNIT * f);
     Object.assign(this.brain.settings, this.settings);
@@ -120,7 +133,7 @@ export class PetApp {
     const v = this._tmp, S = this.S;
     const pts = [];
     for (const n of ['pelvis', 'spine1', 'chest', 'neck2', 'head']) {
-      this.view.bones[n].getWorldPosition(v);
+      this.char.bones[n].getWorldPosition(v);
       pts.push([this.brain.x + v.x * S, this.brain.y - v.y * S]);
     }
     const r = 0.1 * S;
@@ -241,9 +254,9 @@ export class PetApp {
   handleStep(ev) {
     const b = this.brain;
     if (b.mud <= 0.05 || b.mode !== 'ground') return;
-    this.view.orient.updateMatrixWorld(true);
+    this.char.orient.updateMatrixWorld(true);
     const z = STAND_FEET[ev.leg][2];
-    const v = new THREE.Vector3(ev.x, 0.004, z).applyMatrix4(this.view.orient.matrixWorld);
+    const v = new THREE.Vector3(ev.x, 0.004, z).applyMatrix4(this.char.orient.matrixWorld);
     const S = this.S;
     const px = b.x + v.x * S, py = b.y - v.y * S + (z > 0 ? 3 : -3);
     const size = 0.07 * S;
@@ -259,8 +272,9 @@ export class PetApp {
     for (const e of this.brain.events) {
       if (e.type === 'puddle') this.props.puddle = e.puddle;
       else if (e.type === 'splash') this.mudLayer.splat(e.x, e.y, 0.09 * this.S);
-      else if (e.type === 'muddy') this.view.mud = 1;
+      else if (e.type === 'muddy') this.char.mud = 1;
       else if (e.type === 'meow') this.sound.meow(this.settings.size < 0.6 ? 1.15 : 1);
+      else if (e.type === 'bark') this.sound.bark(this.settings.size < 0.6 ? 1.2 : 1);
       else if (e.type === 'purr') this.sound.purr(e.on);
     }
     this.brain.events.length = 0;
@@ -296,14 +310,14 @@ export class PetApp {
     this.syncIcons();
     const d = this.brain.descriptor;
     this.anim.setState(d.state, d.params);
-    this.view.orient.rotation.z = d.rotZ;
+    this.char.orient.rotation.z = d.rotZ;
     this.anim.update(dt, d.ctx);
     for (const ev of this.anim.events) if (ev.type === 'step') this.handleStep(ev);
     this.handleBrainEvents();
     if (render) {
       this.catCanvas.style.display = d.hidden ? 'none' : 'block';
       if (!d.hidden) {
-        const half = (CANVAS * this.settings.size) / 2;
+        const half = (CANVAS * this.settings.size * SPECIES[this.settings.species].scale) / 2;
         this.catCanvas.style.transform = `translate3d(${Math.round(d.x - half)}px, ${Math.round(d.y - half)}px, 0)`;
         this.view.render(dt);
       }

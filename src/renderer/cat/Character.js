@@ -1,18 +1,11 @@
-// Three.js view of the cat: skinned cel-shaded body with outline, big glossy
-// eyes, nose, mouth and whiskers.
+// One playable character (cat or dog): skinned cel-shaded body with outline,
+// big glossy eyes, nose, mouth, whiskers and tongue. Several Characters can live
+// in one scene; only the active one is visible.
 import * as THREE from 'three';
-import { BONES, FACE } from '../../shared/cat/rig-def.js';
+import { getRig } from '../../shared/cat/rig-def.js';
 import { unpackCat } from '../../shared/cat/generate.js';
 import { toonVertex, toonFragment, outlineVertex, outlineFragment } from './toon-shader.js';
-
-export const COATS = {
-  ginger: { base: '#f2a04a', stripe: '#d4742a', white: '#fff4e2', pattern: 1, whiteAmount: 1, ear: '#ffb3a8', eye: ['#7bd66a', '#2f7a3a'], shadow: '#c9a0b8', outline: '#4a2210', nose: '#ff8f9e' },
-  tabby: { base: '#a98562', stripe: '#4b3526', white: '#f5efe6', pattern: 1, whiteAmount: 1, ear: '#f2b6ac', eye: ['#d6d14a', '#6b7a14'], shadow: '#a893b5', outline: '#2c1b12', nose: '#f08c96' },
-  grey: { base: '#9aa3b2', stripe: '#5a6373', white: '#f2f4f8', pattern: 1, whiteAmount: 1, ear: '#f4b8c0', eye: ['#ffd24a', '#b9822a'], shadow: '#9a8cc0', outline: '#272c38', nose: '#f59aa8' },
-  black: { base: '#3a3744', stripe: '#2a2832', white: '#ffffff', pattern: 0, whiteAmount: 0, ear: '#7a5c68', eye: ['#ffd84a', '#c48a1a'], shadow: '#5a4f80', outline: '#0e0c12', nose: '#c07a8a' },
-  tuxedo: { base: '#3a3744', stripe: '#2a2832', white: '#fffaf2', pattern: 0, whiteAmount: 1, ear: '#e7aab0', eye: ['#8fe07a', '#2f8a3a'], shadow: '#6a5f92', outline: '#0e0c12', nose: '#f59aa8' },
-  cream: { base: '#f3dcb2', stripe: '#d9b27a', white: '#fffaf0', pattern: 0.7, whiteAmount: 1, ear: '#ffbdb2', eye: ['#7ec8ee', '#2a6aa0'], shadow: '#cfa8c0', outline: '#5a3a22', nose: '#ff9aa6' },
-};
+import { COATS } from './coats.js';
 
 const eyeVertex = /* glsl */ `
 varying vec3 vP; varying vec3 vNv; varying vec3 vView;
@@ -24,75 +17,53 @@ void main(){
   gl_Position = projectionMatrix * mv;
 }`;
 
-// Big toon eye: coloured iris, tall pupil, two white highlights, lid outline.
+// Big toon eye: coloured iris, pupil (slit or round), two white highlights, lid outline.
 const eyeFragment = /* glsl */ `
 precision highp float;
 varying vec3 vP; varying vec3 vNv; varying vec3 vView;
 uniform vec3 uIris; uniform vec3 uIris2; uniform vec3 uLid; uniform vec3 uOutline;
 uniform float uBlink; uniform float uPupil; uniform float uR;
+uniform float uPupMin; uniform float uPupMax; uniform float uPupH;
 float e(float v, float w){ return smoothstep(-w, w, v); }
 void main(){
   vec3 p = vP / uR;
   vec2 q = vec2(p.z, p.y);
   float front = p.x;
-  // sclera is mostly hidden: iris fills the eye
   float r = length(q * vec2(0.95, 0.78));
-  vec3 col = mix(uIris, uIris2, smoothstep(-0.7, 0.8, q.y * -1.0 + 0.0) * 0.9);   // darker at the top (lid shadow)
+  vec3 col = mix(uIris, uIris2, smoothstep(-0.7, 0.8, q.y * -1.0 + 0.0) * 0.9);
   col = mix(col, uIris * 1.1, smoothstep(0.1, 0.9, -q.y) * 0.5);
-  // pupil: vertical oval that widens with uPupil
-  float pw = mix(0.2, 0.55, uPupil);
-  float pupil = 1.0 - e(length(vec2(q.x / pw, q.y / 0.78)) - 1.0, 0.06);
+  float pw = mix(uPupMin, uPupMax, uPupil);
+  float pupil = 1.0 - e(length(vec2(q.x / pw, q.y / uPupH)) - 1.0, 0.06);
   col = mix(col, vec3(0.03, 0.02, 0.04), pupil);
-  // limbal ring
   col = mix(col, uOutline, smoothstep(0.78, 1.0, r) * 0.7);
-  // highlights (sit on the camera-facing side of the eye)
-  float h1 = 1.0 - e(length((q - vec2(-0.3, 0.38)) * vec2(1.0, 1.0)) - 0.24, 0.05);
+  float h1 = 1.0 - e(length((q - vec2(-0.3, 0.38))) - 0.24, 0.05);
   float h2 = 1.0 - e(length((q - vec2(0.33, -0.34))) - 0.1, 0.05);
   col = mix(col, vec3(1.0), clamp(h1 + h2, 0.0, 1.0) * (1.0 - uBlink * 0.9));
-  // eyelids
   float upper = mix(1.2, -1.1, uBlink) - 0.25 * q.x * q.x;
   float lower = mix(-1.3, -0.1, uBlink) + 0.1 * q.x * q.x;
   float cover = max(e(q.y - upper, 0.04), e(lower - q.y, 0.04));
-  float line = max(1.0 - smoothstep(0.0, 0.1, abs(q.y - upper)), 1.0 - smoothstep(0.0, 0.1, abs(q.y - lower))) ;
+  float line = max(1.0 - smoothstep(0.0, 0.1, abs(q.y - upper)), 1.0 - smoothstep(0.0, 0.1, abs(q.y - lower)));
   col = mix(col, uLid, clamp(cover, 0.0, 1.0));
-  col = mix(col, uOutline, line * 0.9 * step(0.02, uBlink) + line * 0.0);
-  // outer edge outline
-  col = mix(col, uOutline, smoothstep(0.9, 1.0, length(q)) );
+  col = mix(col, uOutline, line * 0.9 * step(0.02, uBlink));
+  col = mix(col, uOutline, smoothstep(0.9, 1.0, length(q)));
   col = mix(col, uOutline * 0.5, step(front, 0.0));
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
 }`;
 
-export class CatView {
-  constructor(canvas, modelBuffer, opts = {}) {
-    this.opts = { pxPerUnit: 480, size: 640, outline: 0.0055, ...opts };
-    const { size } = this.opts;
-    this.baseSize = size;
-    this.sizeFactor = 1;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, premultipliedAlpha: true, powerPreference: 'default' });
-    this.renderer.setClearColor(0x000000, 0);
-    this.renderer.setPixelRatio(opts.pixelRatio || window.devicePixelRatio || 1);
-    this.renderer.setSize(size, size, false);
-    canvas.style.width = size + 'px';
-    canvas.style.height = size + 'px';
-    this.canvas = canvas;
+export class Character {
+  constructor(scene, species, modelBuffer, opts = {}) {
+    this.species = species;
+    this.def = getRig(species);
+    this.dog = species === 'dog';
+    this.outlineWidth = opts.outline ?? 0.0055;
+    this.scene = scene;
+    this.mud = 0;
+    this.mouth = 0;
 
-    this.scene = new THREE.Scene();
-    // Near-orthographic perspective: 1 cat unit == pxPerUnit px at z = 0.
-    const H = size / this.opts.pxPerUnit;
-    const fov = 12;
-    const dist = H / 2 / Math.tan((fov * Math.PI) / 360);
-    this.camera = new THREE.PerspectiveCamera(fov, 1, dist * 0.5, dist * 2);
-    this.camera.position.set(0, 0, dist);
-    this.scene.add(this.camera);
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
-    key.position.set(-0.5, 0.7, 0.6);
-    this.scene.add(key);
-    this.scene.add(new THREE.HemisphereLight(0xffffff, 0xc8b8c8, 1.4));
-
-    // `orient` carries the cat's placement/orientation; `rig` holds the skeleton.
+    // `orient` carries placement/orientation; `rig` holds the skeleton.
     this.orient = new THREE.Group();
-    this.scene.add(this.orient);
+    scene.add(this.orient);
     this.rig = new THREE.Group();
     this.orient.add(this.rig);
 
@@ -101,12 +72,15 @@ export class CatView {
     this._buildBody(unpackCat(modelBuffer));
     this._buildFace();
     this._buildShadow();
-    this.setCoat('ginger');
-    this.mud = 0;
-    this.time = 0;
+    this.coatName = null;
+    this.setCoat(this.dog ? 'golden' : 'ginger');
   }
 
+  set visible(v) { this.orient.visible = v; }
+  get visible() { return this.orient.visible; }
+
   _buildSkeleton() {
+    const BONES = this.def.BONES;
     const list = [];
     for (const def of BONES) {
       const b = new THREE.Bone();
@@ -135,14 +109,16 @@ export class CatView {
     geo.setAttribute('skinWeight', new THREE.BufferAttribute(m.skinWeight, 4));
     geo.setIndex(new THREE.BufferAttribute(m.indices, 1));
 
+    const C = () => new THREE.Color();
     this.uniforms = {
-      uBase: { value: new THREE.Color() }, uStripe: { value: new THREE.Color() }, uWhite: { value: new THREE.Color() },
-      uEarInner: { value: new THREE.Color() }, uBlush: { value: new THREE.Color() }, uShadowTint: { value: new THREE.Color() },
-      uPattern: { value: 1 }, uWhiteAmount: { value: 1 }, uMud: { value: 0 },
+      uBase: { value: C() }, uStripe: { value: C() }, uWhite: { value: C() }, uEarInner: { value: C() }, uEarOuter: { value: C() },
+      uHeadCol: { value: C() }, uShadowTint: { value: C() },
+      uPatternType: { value: 0 }, uStrength: { value: 1 }, uWhiteAmount: { value: 1 }, uDog: { value: this.dog ? 1 : 0 },
+      uBlaze: { value: 0 }, uHasHead: { value: 0 }, uMud: { value: 0 },
       uLight: { value: new THREE.Vector3(-0.45, 0.75, 0.55) },
     };
     this.bodyMaterial = new THREE.ShaderMaterial({ vertexShader: toonVertex, fragmentShader: toonFragment, uniforms: this.uniforms });
-    this.outlineUniforms = { uThickness: { value: this.opts.outline }, uColor: { value: new THREE.Color('#3a1c10') } };
+    this.outlineUniforms = { uThickness: { value: this.outlineWidth }, uColor: { value: new THREE.Color('#3a1c10') } };
     this.outlineMaterial = new THREE.ShaderMaterial({
       vertexShader: outlineVertex, fragmentShader: outlineFragment, uniforms: this.outlineUniforms, side: THREE.BackSide,
     });
@@ -160,10 +136,10 @@ export class CatView {
   }
 
   _buildFace() {
+    const FACE = this.def.FACE;
     const head = this.bones.head;
-    const hp = BONES.find((b) => b.name === 'head').pos;
+    const hp = this.def.BONES.find((b) => b.name === 'head').pos;
     const local = (p) => new THREE.Vector3(p[0] - hp[0], p[1] - hp[1], p[2] - hp[2]);
-
     this.eyes = {};
     this.eyeMaterials = [];
     const sphere = new THREE.SphereGeometry(FACE.eyeRadius, 32, 24);
@@ -174,56 +150,73 @@ export class CatView {
           uIris: { value: new THREE.Color() }, uIris2: { value: new THREE.Color() }, uLid: { value: new THREE.Color() },
           uOutline: { value: new THREE.Color() },
           uBlink: { value: 0 }, uPupil: { value: 0.5 }, uR: { value: FACE.eyeRadius },
+          // cats: vertical slits; dogs: big round pupils
+          uPupMin: { value: this.dog ? 0.5 : 0.2 }, uPupMax: { value: this.dog ? 0.62 : 0.55 }, uPupH: { value: this.dog ? 0.62 : 0.78 },
         },
       });
       this.eyeMaterials.push(mat);
       const pivot = new THREE.Group();
       pivot.position.copy(local(side === 'L' ? FACE.eyeL : FACE.eyeR));
       const m = new THREE.Mesh(sphere, mat);
-      m.scale.set(0.5, 1.1, 0.9);   // flattened into the face, a little tall
+      m.scale.set(this.dog ? 0.55 : 0.5, this.dog ? 1.0 : 1.1, this.dog ? 1.0 : 0.9);
       pivot.add(m);
       head.add(pivot);
       this.eyes[side] = { pivot, mat };
     }
 
-    // nose: small rounded wedge
     this.noseMat = new THREE.MeshBasicMaterial({ color: '#ff8f9e' });
-    const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), this.noseMat);
-    nose.scale.set(0.007, 0.0075, 0.0125);
+    const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), this.noseMat);
+    if (this.dog) nose.scale.set(0.017, 0.0135, 0.021); else nose.scale.set(0.007, 0.0075, 0.0125);
     nose.position.copy(local(FACE.nose));
     head.add(nose);
     this.nose = nose;
+    if (this.dog) {   // a shiny highlight dot on the dog's nose (child of the squashed sphere, so unit-sized)
+      const gloss = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial({ color: '#ffffff' }));
+      gloss.scale.set(0.22, 0.16, 0.26); gloss.position.set(0.15, 0.62, 0.38); nose.add(gloss);
+    }
 
-    // ":3" mouth
     this.lineMat = new THREE.MeshBasicMaterial({ color: '#3a1c10' });
     for (const s of [1, -1]) {
-      const pts = [
-        new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.002, -0.009, s * 0.002), new THREE.Vector3(-0.003, -0.015, s * 0.011), new THREE.Vector3(-0.001, -0.016, s * 0.022),
-      ];
-      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.0011, 5), this.lineMat);
-      tube.position.copy(local([FACE.nose[0] - 0.003, FACE.nose[1] - 0.006, 0]));
+      const pts = this.dog
+        ? [new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.004, -0.014, s * 0.002), new THREE.Vector3(-0.026, -0.02, s * 0.014), new THREE.Vector3(-0.056, -0.017, s * 0.03), new THREE.Vector3(-0.082, -0.008, s * 0.036)]
+        : [new THREE.Vector3(0, 0, 0), new THREE.Vector3(-0.002, -0.009, s * 0.002), new THREE.Vector3(-0.003, -0.015, s * 0.011), new THREE.Vector3(-0.001, -0.016, s * 0.022)];
+      const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.0011, 5), this.lineMat);
+      tube.position.copy(local([FACE.nose[0] - (this.dog ? 0.012 : 0.003), FACE.nose[1] - (this.dog ? 0.012 : 0.006), 0]));
       head.add(tube);
     }
 
-    // whiskers: three per side, dark and thin
+    // tongue: hangs from the mouth, scaled by `mouth` (0 hidden .. 1 out)
+    this.tongue = new THREE.Group();
+    this.tongue.position.copy(local(FACE.tongue));
+    const tongueMat = new THREE.MeshBasicMaterial({ color: '#ff7f95' });
+    const tm = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), tongueMat);
+    tm.scale.set(this.dog ? 0.022 : 0.012, this.dog ? 0.036 : 0.02, this.dog ? 0.016 : 0.01);
+    tm.position.set(this.dog ? 0.012 : 0.004, this.dog ? -0.03 : -0.014, 0);
+    this.tongue.add(tm);
+    const crease = new THREE.Mesh(new THREE.BoxGeometry(0.0012, this.dog ? 0.026 : 0.012, 0.0012), new THREE.MeshBasicMaterial({ color: '#d9506c' }));
+    crease.position.set(this.dog ? 0.03 : 0.012, this.dog ? -0.03 : -0.014, 0);
+    this.tongue.add(crease);
+    this.tongue.scale.setScalar(0.0001);
+    head.add(this.tongue);
+    this.tongueMat = tongueMat;
+
+    // whiskers (cat: three per side; dog: none, just the groups the rig animates)
     this.whiskerMat = new THREE.MeshBasicMaterial({ color: '#3a1c10' });
     this.whiskers = { L: new THREE.Group(), R: new THREE.Group() };
     for (const side of ['L', 'R']) {
       const s = side === 'L' ? 1 : -1;
       const g = this.whiskers[side];
       g.position.copy(local([FACE.whiskerRoot[0] - 0.006, FACE.whiskerRoot[1], FACE.whiskerRoot[2] * s]));
-      for (let i = 0; i < 3; i++) {
-        const spread = (i - 1) * 0.32;
-        const length = 0.075 - Math.abs(i - 1) * 0.012;
-        const pts = [];
-        for (let t = 0; t <= 1.001; t += 0.25) {
-          pts.push(new THREE.Vector3(
-            Math.cos(spread) * length * t * 0.35,
-            Math.sin(spread) * length * t * 0.8 - 0.02 * t * t * length * 3,
-            s * length * t * 0.9,
-          ));
+      if (!this.dog) {
+        for (let i = 0; i < 3; i++) {
+          const spread = (i - 1) * 0.32;
+          const length = 0.075 - Math.abs(i - 1) * 0.012;
+          const pts = [];
+          for (let t = 0; t <= 1.001; t += 0.25) {
+            pts.push(new THREE.Vector3(Math.cos(spread) * length * t * 0.35, Math.sin(spread) * length * t * 0.8 - 0.02 * t * t * length * 3, s * length * t * 0.9));
+          }
+          g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.0011, 4), this.whiskerMat));
         }
-        g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.0011, 4), this.whiskerMat));
       }
       head.add(g);
     }
@@ -247,27 +240,32 @@ export class CatView {
     );
     this.shadow.rotation.x = -Math.PI / 2;
     this.shadow.position.set(-0.01, 0.0015, 0);
-    this.shadow.scale.set(0.66, 0.3, 1);
+    this.shadow.scale.set(this.dog ? 0.78 : 0.66, 0.3, 1);
     this.shadow.renderOrder = -1;
     this.orient.add(this.shadow);
   }
 
   setCoat(name) {
-    const c = COATS[name] || COATS.ginger;
-    this.coatName = name;
+    const set = COATS[this.species];
+    const c = set[name] || set[Object.keys(set)[0]];
+    this.coatName = set[name] ? name : Object.keys(set)[0];
     const u = this.uniforms;
     u.uBase.value.set(c.base);
     u.uStripe.value.set(c.stripe);
     u.uWhite.value.set(c.white);
     u.uEarInner.value.set(c.ear);
+    u.uEarOuter.value.set(c.earOuter || c.base);
+    u.uHeadCol.value.set(c.head || c.base);
     u.uShadowTint.value.set(c.shadow);
-    u.uPattern.value = c.pattern;
+    u.uPatternType.value = c.pattern;
+    u.uStrength.value = c.strength ?? 1;
     u.uWhiteAmount.value = c.whiteAmount;
+    u.uBlaze.value = c.blaze || 0;
     this.outlineUniforms.uColor.value.set(c.outline);
     for (const m of this.eyeMaterials) {
       m.uniforms.uIris.value.set(c.eye[0]);
       m.uniforms.uIris2.value.set(c.eye[1]);
-      m.uniforms.uLid.value.set(c.base);
+      m.uniforms.uLid.value.set(this.dog ? (c.head || c.base) : c.base);
       m.uniforms.uOutline.value.set(c.outline);
     }
     this.noseMat.color.set(c.nose);
@@ -275,27 +273,12 @@ export class CatView {
     this.whiskerMat.color.set(c.outline);
   }
 
-  /** Scale the whole cat on screen (1 = 480 px per cat unit). */
-  setSizeFactor(f) {
-    this.sizeFactor = f;
-    const px = Math.round(this.baseSize * f);
-    this.renderer.setSize(px, px, false);
-    this.canvas.style.width = px + 'px';
-    this.canvas.style.height = px + 'px';
-    this.outlineUniforms.uThickness.value = this.opts.outline * (f < 0.8 ? 1.25 : 1);
+  setMouth(v) {
+    this.mouth = v;
+    this.tongue.scale.setScalar(Math.max(0.0001, v));
   }
 
-  // Kept for API compatibility with the realistic-fur version: no-ops here.
-  setFurQuality() {}
-  updateFur() {}
+  setOutlineScale(k) { this.outlineUniforms.uThickness.value = this.outlineWidth * k; }
 
-  render(dt = 0.016) {
-    this.time += dt;
-    this.uniforms.uMud.value = this.mud;
-    this.renderer.render(this.scene, this.camera);
-  }
-
-  dispose() {
-    this.renderer.dispose();
-  }
+  syncUniforms() { this.uniforms.uMud.value = this.mud; }
 }

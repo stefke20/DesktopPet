@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 
 fs.mkdirSync('dist', { recursive: true });
-if (!fs.existsSync('dist/cat.bin') || process.argv.includes('--force') || newer('src/shared/cat', 'dist/cat.bin')) {
+if (!fs.existsSync('dist/cat.bin') || !fs.existsSync('dist/dog.bin') || process.argv.includes('--force') || newer('src/shared/cat', 'dist/cat.bin')) {
   execFileSync(process.execPath, ['tools/build-cat.mjs', '--quiet'], { stdio: 'inherit' });
 }
 

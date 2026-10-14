@@ -31,6 +31,20 @@ export class CatSound {
     osc.start(t); osc2.start(t); osc.stop(t + dur + 0.05); osc2.stop(t + dur + 0.05);
   }
 
+  bark(pitch = 1) {
+    if (!this.enabled || !this._ensure()) return;
+    const c = this.ctx;
+    const burst = (at, f0) => {
+      const t = c.currentTime + at, dur = 0.16;
+      const osc = c.createOscillator(); osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f0 * pitch, t); osc.frequency.exponentialRampToValueAtTime(f0 * 0.55 * pitch, t + dur);
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 3; bp.frequency.setValueAtTime(900, t); bp.frequency.linearRampToValueAtTime(500, t + dur);
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.3, t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      osc.connect(bp); bp.connect(g); g.connect(c.destination); osc.start(t); osc.stop(t + dur + 0.02);
+    };
+    burst(0, 330); if (Math.random() < 0.7) burst(0.24, 300);
+  }
+
   purr(on) {
     if (!on) {
       if (this.purrNodes) { const { src, g } = this.purrNodes; const t = this.ctx.currentTime; g.gain.cancelScheduledValues(t); g.gain.linearRampToValueAtTime(0, t + 0.4); setTimeout(() => { try { src.stop(); } catch { /* ignore */ } }, 500); this.purrNodes = null; }

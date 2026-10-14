@@ -22,12 +22,12 @@ let i = 0;
 for (const it of items) {
   await page.evaluate((it) => {
     const h = window.harness;
-    h.anim.cur = h.anim.cur; // keep continuity unless reset requested
+    if (it.species) h.setSpecies(it.species);
     if (it.reset) { h.anim.state = 'stand'; }
-    if (it.coat) h.view.setCoat(it.coat);
+    if (it.coat) h.char.setCoat(it.coat);
     h.anim.yawCam = it.yaw === undefined ? 0.35 : it.yaw; h.anim.yawCur = h.anim.yawCam;
     if (it.facing !== undefined) h.anim.facing = it.facing;
-    h.view.orient.rotation.z = it.rotZ || 0;
+    h.char.orient.rotation.z = it.rotZ || 0;
     h.run(it.state, it.params || {}, it.seconds ?? 1.2, it.ctx || {});
   }, it);
   const f = path.join(tmp, `c${String(i++).padStart(2, '0')}.png`);
