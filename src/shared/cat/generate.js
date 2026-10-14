@@ -130,7 +130,7 @@ export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
   log(`field ${nx}x${ny}x${nz} in ${Date.now() - t0}ms`);
 
   let { verts, tris } = surfaceNets(f, nx, ny, nz, lo, voxel);
-  smooth(verts, tris, 2, 0.5);
+  smooth(verts, tris, 3, 0.5);
   project(verts, 3);
   log(`mesh ${verts.length / 3} verts, ${tris.length / 3} tris in ${Date.now() - t0}ms`);
 

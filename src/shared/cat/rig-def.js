@@ -11,22 +11,22 @@ const mirror = (p) => [p[0], p[1], -p[2]];
 // name, parent, joint position, optional end (leaf only), influence radius used
 // for skin weights (distance to bone *surface* decides who moves a vertex).
 const core = [
-  ['pelvis', null, [-0.155, 0.19, 0], null, 0.078],
-  ['spine1', 'pelvis', [-0.04, 0.2, 0], null, 0.082],
+  ['pelvis', null, [-0.105, 0.19, 0], null, 0.078],
+  ['spine1', 'pelvis', [-0.015, 0.2, 0], null, 0.082],
   ['chest', 'spine1', [0.085, 0.205, 0], null, 0.08],
   ['neck1', 'chest', [0.185, 0.245, 0], null, 0.052],
   ['neck2', 'neck1', [0.245, 0.28, 0], null, 0.048],
-  ['head', 'neck2', [0.295, 0.295, 0], [0.392, 0.272, 0], 0.056],
+  ['head', 'neck2', [0.295, 0.295, 0], [0.4, 0.28, 0], 0.07],
 ];
 
 const ears = [
-  ['earL', 'head', [0.283, 0.338, 0.033], [0.268, 0.412, 0.05], 0.014],
-  ['earR', 'head', [0.283, 0.338, -0.033], [0.268, 0.412, -0.05], 0.014],
+  ['earL', 'head', [0.28, 0.36, 0.05], [0.262, 0.455, 0.066], 0.02],
+  ['earR', 'head', [0.28, 0.36, -0.05], [0.262, 0.455, -0.066], 0.02],
 ];
 
 const tailPts = [
-  [-0.225, 0.205, 0], [-0.285, 0.222, 0], [-0.34, 0.243, 0],
-  [-0.39, 0.268, 0], [-0.432, 0.298, 0], [-0.458, 0.335, 0], [-0.466, 0.378, 0],
+  [-0.175, 0.205, 0], [-0.235, 0.222, 0], [-0.29, 0.243, 0],
+  [-0.34, 0.268, 0], [-0.382, 0.298, 0], [-0.408, 0.335, 0], [-0.416, 0.378, 0],
 ];
 const tail = tailPts.slice(0, -1).map((p, i) => [
   'tail' + i, i === 0 ? 'pelvis' : 'tail' + (i - 1), p,
@@ -43,9 +43,9 @@ function legs() {
     out.push([`ff${side}`, `fu${side}`, m([0.09, 0.112, 0.04]), null, 0.024]);
     out.push([`fp${side}`, `ff${side}`, m([0.108, 0.044, 0.04]), m([0.136, 0.004, 0.04]), 0.02]);
     // Hind leg: hip -> knee -> hock -> toe
-    out.push([`ht${side}`, 'pelvis', m([-0.15, 0.178, 0.05]), null, 0.04]);
-    out.push([`hs${side}`, `ht${side}`, m([-0.09, 0.115, 0.048]), null, 0.024]);
-    out.push([`hm${side}`, `hs${side}`, m([-0.168, 0.064, 0.045]), m([-0.138, 0.004, 0.044]), 0.02]);
+    out.push([`ht${side}`, 'pelvis', m([-0.1, 0.178, 0.05]), null, 0.04]);
+    out.push([`hs${side}`, `ht${side}`, m([-0.04, 0.115, 0.048]), null, 0.024]);
+    out.push([`hm${side}`, `hs${side}`, m([-0.118, 0.064, 0.045]), m([-0.088, 0.004, 0.044]), 0.02]);
   }
   return out;
 }
@@ -75,10 +75,10 @@ export const TAIL_BONES = tail.map((t) => t[0]);
 
 // Eye / nose anchor points on the head (rest pose, world == head-bone space + head joint).
 export const FACE = {
-  eyeL: [0.351, 0.303, 0.027],
-  eyeR: [0.351, 0.303, -0.027],
-  eyeRadius: 0.0125,
-  nose: [0.384, 0.277, 0],
-  muzzle: [0.36, 0.268, 0],
-  whiskerRoot: [0.368, 0.264, 0.017],
+  eyeL: [0.386, 0.315, 0.047],
+  eyeR: [0.386, 0.315, -0.047],
+  eyeRadius: 0.027,
+  nose: [0.404, 0.292, 0],
+  muzzle: [0.382, 0.283, 0],
+  whiskerRoot: [0.39, 0.278, 0.024],
 };

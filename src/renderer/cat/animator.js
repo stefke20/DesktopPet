@@ -91,7 +91,7 @@ export class CatAnimator {
       const off = lerp(walkOff[f], runOff[f], W);
       const ph = (((phase + off) % 1) + 1) % 1;
       const front = f[0] === 'f';
-      const x0 = front ? 0.118 : -0.128;
+      const x0 = front ? 0.118 : -0.078;
       const z = STAND_FEET[f][2];
       let x, y, pawA;
       if (ph < beta) {
@@ -149,7 +149,7 @@ export class CatAnimator {
         p.s1[0] = -0.1 * sh; p.ch[0] = -0.12 * sh;
         p.n1[0] = -0.3 * sh; p.n2[0] = -0.28 * sh; p.hd[0] = -0.12 * sh;
         p.ch[0] += 0.012 * breathe;
-        p.hL = [-0.015, 0, 0.062, 0.0]; p.hR = [-0.015, 0, -0.062, 0.0];
+        p.hL = [0.035, 0, 0.062, 0.0]; p.hR = [0.035, 0, -0.062, 0.0];
         p.fL = [0.06, 0, 0.035, 0.1]; p.fR = [0.06, 0, -0.035, 0.1];
         this._tail(p, P.tail || 'wrap', 0.25, 0.5);
         this._ears(p, P.ears || 'normal', t);
@@ -159,7 +159,7 @@ export class CatAnimator {
         p.bodyY = -0.1; p.pitch = 0.05; p.s1[0] = 0; p.ch[0] = 0.04;
         p.n1[0] = -0.2; p.n2[0] = -0.1; p.hd[0] = -0.15;
         p.fL = [0.12, 0, 0.045, 0.2]; p.fR = [0.12, 0, -0.045, 0.2];
-        p.hL = [-0.07, 0, 0.075, 0.3]; p.hR = [-0.07, 0, -0.075, 0.3];
+        p.hL = [-0.02, 0, 0.075, 0.3]; p.hR = [-0.02, 0, -0.075, 0.3];
         p.ch[0] += 0.016 * breathe; p.s1[0] += 0.01 * breathe;
         this._tail(p, 'wrap', 0.1, 0.3);
         this._ears(p, P.ears || 'normal', t);
@@ -169,7 +169,7 @@ export class CatAnimator {
         p.bodyY = -0.108; p.pitch = 0.02; p.ch[0] = 0.06; p.s1[1] = 0.12; p.ch[1] = 0.2;
         p.n1[0] = -0.55; p.n2[0] = -0.4; p.hd[0] = -0.3; p.n1[1] = 0.35; p.n2[1] = 0.25; p.hd[1] = 0.3;
         p.fL = [0.1, 0, 0.05, 0.2]; p.fR = [0.115, 0, -0.04, 0.2];
-        p.hL = [-0.06, 0, 0.082, 0.3]; p.hR = [-0.06, 0, -0.082, 0.3];
+        p.hL = [-0.01, 0, 0.082, 0.3]; p.hR = [-0.01, 0, -0.082, 0.3];
         const sl = Math.sin(this.time * 1.4);
         p.ch[0] += 0.02 * sl; p.s1[0] = 0.012 * sl; p.bodyY += 0.003 * sl;
         p.eye = 0.0; p.pupil = 0.9;
@@ -182,7 +182,7 @@ export class CatAnimator {
         p.bodyY = -0.09 * k; p.pitch = -0.05 * k; p.ch[0] = 0.12 * k; p.s1[0] = 0.05 * k;
         p.n1[0] = -0.1; p.hd[0] = 0;
         p.fL = [0.13, 0, 0.042, 0.2]; p.fR = [0.13, 0, -0.042, 0.2];
-        p.hL = [-0.1, 0, 0.055, 0.1]; p.hR = [-0.1, 0, -0.055, 0.1];
+        p.hL = [-0.05, 0, 0.055, 0.1]; p.hR = [-0.05, 0, -0.055, 0.1];
         p.pupil = 0.95;
         p.roll = (P.wiggle ? 0.06 * Math.sin(this.time * 24) : 0);
         p.yaw = (P.wiggle ? 0.1 * Math.sin(this.time * 24) : 0);
@@ -198,10 +198,10 @@ export class CatAnimator {
         p.n1[0] = -0.1 * rise; p.hd[0] = -0.1 * rise;
         if (rise > 0) {
           p.fL = [0.24, 0.1, 0.05, -0.2]; p.fR = [0.22, 0.09, -0.05, -0.2];
-          p.hL = [-0.24, 0.02, 0.05, 0.4]; p.hR = [-0.25, 0.04, -0.05, 0.4];
+          p.hL = [-0.19, 0.02, 0.05, 0.4]; p.hR = [-0.2, 0.04, -0.05, 0.4];
         } else {
           p.fL = [0.22, 0.04, 0.05, -0.3]; p.fR = [0.2, 0.05, -0.05, -0.3];
-          p.hL = [-0.14, 0.02, 0.055, 0.3]; p.hR = [-0.15, 0.03, -0.055, 0.3];
+          p.hL = [-0.09, 0.02, 0.055, 0.3]; p.hR = [-0.1, 0.03, -0.055, 0.3];
         }
         this._tail(p, 'rest', 0.1, 1);
         this._ears(p, 'back', t);
@@ -211,7 +211,7 @@ export class CatAnimator {
         const k = Math.min(1, t * 4);
         p.pitch = -0.1; p.ch[0] = 0.1;
         p.fL = [0.2, 0.12, 0.08, -0.5]; p.fR = [0.18, 0.1, -0.08, -0.5];
-        p.hL = [-0.2, 0.1, 0.08, 0.5]; p.hR = [-0.2, 0.1, -0.08, 0.5];
+        p.hL = [-0.15, 0.1, 0.08, 0.5]; p.hR = [-0.15, 0.1, -0.08, 0.5];
         p.eye = 1; p.pupil = 1.0;
         this._tail(p, 'puff', 0.8 * k, 2.2);
         this._ears(p, 'flat', t);
@@ -227,7 +227,7 @@ export class CatAnimator {
         p.pitch = -0.6; p.ch[0] = -0.25; p.s1[0] = -0.2; p.n1[0] = 0.5; p.n2[0] = 0.4; p.hd[0] = 0.3;
         const sw = Math.sin(this.time * 2.6) * 0.06;
         p.fL = [0.1 + sw, 0.0, 0.05, 0.6]; p.fR = [0.1 + sw, 0.0, -0.05, 0.6];
-        p.hL = [-0.05 - sw, -0.02, 0.06, 0.8]; p.hR = [-0.05 - sw, -0.02, -0.06, 0.8];
+        p.hL = [0.0 - sw, -0.02, 0.06, 0.8]; p.hR = [0.0 - sw, -0.02, -0.06, 0.8];
         p.eye = 0.7; p.pupil = 0.9;
         this._tail(p, 'hang', 0.1, 1.5);
         this._ears(p, 'back', t);

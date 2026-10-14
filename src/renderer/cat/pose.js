@@ -6,7 +6,7 @@ export const FEET = ['fL', 'fR', 'hL', 'hR'];
 // Rest/standing toe positions (rig space; y = ground).
 export const STAND_FEET = {
   fL: [0.125, 0, 0.042], fR: [0.125, 0, -0.042],
-  hL: [-0.135, 0, 0.046], hR: [-0.135, 0, -0.046],
+  hL: [-0.085, 0, 0.046], hR: [-0.085, 0, -0.046],
 };
 
 export function newPose() {
