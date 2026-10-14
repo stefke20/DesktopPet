@@ -9,6 +9,7 @@ import { CatBrain } from '../shared/sim/brain.js';
 import { makeRng } from '../shared/sim/geometry.js';
 import { MudLayer } from './overlay/mud.js';
 import { PropsLayer } from './overlay/props.js';
+import { CatSound } from './sound.js';
 
 const PX_PER_UNIT = 480;
 const CANVAS = 640;
@@ -25,6 +26,7 @@ export class PetApp {
     this.catCanvas = document.getElementById('cat');
     this.view = new CatView(this.catCanvas, catBuffer, { pxPerUnit: PX_PER_UNIT, size: CANVAS });
     this.anim = new CatAnimator(this.view);
+    this.sound = new CatSound();
 
     const U = PX_PER_UNIT * this.settings.size;
     this.world = new World({ width: W, height: H, floorY: display.floorY, catH: 0.32 * U });
@@ -109,6 +111,8 @@ export class PetApp {
     this.view.setSizeFactor(f);
     this.brain.setScale(PX_PER_UNIT * f);
     Object.assign(this.brain.settings, this.settings);
+    this.sound.enabled = !!this.settings.sound;
+    if (!this.settings.sound) this.sound.purr(false);
   }
 
   // ------------------------------------------------------------- input
@@ -256,6 +260,8 @@ export class PetApp {
       if (e.type === 'puddle') this.props.puddle = e.puddle;
       else if (e.type === 'splash') this.mudLayer.splat(e.x, e.y, 0.09 * this.S);
       else if (e.type === 'muddy') this.view.mud = 1;
+      else if (e.type === 'meow') this.sound.meow(this.settings.size < 0.6 ? 1.15 : 1);
+      else if (e.type === 'purr') this.sound.purr(e.on);
     }
     this.brain.events.length = 0;
   }
@@ -266,7 +272,10 @@ export class PetApp {
     this.last = now;
     if (!(dt > 0)) return;
     if (this.settings.paused || !this.running) return;
-    this.tick(Math.min(dt, 0.05), true);
+    // a calm cat doesn't need 60 fps: render every other frame to spare the GPU
+    const calm = this.brain.mode === 'ground' && ['sit', 'groom', 'sleep', 'loaf', 'stand', 'pet'].includes(this.brain.anim.state);
+    this.skip = !this.skip;
+    this.tick(Math.min(dt, 0.05), !(calm && this.skip));
   }
 
   /** Advance the whole app by dt seconds (render=false fast-forwards for tests). */

@@ -1,7 +1,7 @@
 // Build the skinned cat mesh from the SDF: surface nets -> projection ->
 // smoothing -> normals -> skin weights -> per-vertex fur attributes.
 import { catSdf, prepareBounds, BOUNDS } from './shape.js';
-import { BONES, boneSegments, FACE } from './rig-def.js';
+import { boneSegments } from './rig-def.js';
 
 function surfaceNets(f, nx, ny, nz, lo, h) {
   const idx = (i, j, k) => i + nx * (j + ny * k);
@@ -97,22 +97,11 @@ function smooth(verts, tris, iterations, lambda) {
   }
 }
 
-const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-
 function distSeg(p, a, b) {
   const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
   const apx = p[0] - a[0], apy = p[1] - a[1], apz = p[2] - a[2];
   const t = Math.min(1, Math.max(0, (apx * abx + apy * aby + apz * abz) / (abx * abx + aby * aby + abz * abz || 1)));
   return Math.hypot(apx - abx * t, apy - aby * t, apz - abz * t);
-}
-
-// Grain: the direction fur lies in (head -> tail on the body, downward on legs ...).
-function grainFor(boneName, seg) {
-  if (/^(pelvis|spine|chest|neck|head)/.test(boneName)) return [-1, -0.25, 0];
-  if (/^ear/.test(boneName)) return [0, 1, 0];
-  const d = [seg.b[0] - seg.a[0], seg.b[1] - seg.a[1], seg.b[2] - seg.a[2]];
-  const l = Math.hypot(...d) || 1;
-  return [d[0] / l, d[1] / l, d[2] / l];
 }
 
 export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
@@ -148,67 +137,34 @@ export function generateCat({ voxel = 0.0055, log = () => {} } = {}) {
 
   const n = verts.length / 3;
   const normals = new Float32Array(n * 3);
-  const grain = new Float32Array(n * 3);
-  const furLen = new Float32Array(n);
-  const boneDom = new Float32Array(n);
   const skinIndex = new Uint16Array(n * 4);
   const skinWeight = new Float32Array(n * 4);
   const segs = boneSegments();
-  const grains = BONES.map((b, i) => grainFor(b.name, segs[i]));
   const tau = 0.011;
 
   for (let v = 0; v < n; v++) {
     const p = [verts[v * 3], verts[v * 3 + 1], verts[v * 3 + 2]];
-    const g = gradient(p[0], p[1], p[2]);
-    normals.set(g, v * 3);
+    normals.set(gradient(p[0], p[1], p[2]), v * 3);
 
-    const ds = segs.map((s) => distSeg(p, s.a, s.b) - s.r);
+    // skin weights: nearest bones by distance to the bone *surface*, soft-blended
+    const ds = segs.map((sg) => distSeg(p, sg.a, sg.b) - sg.r);
     let dmin = Infinity;
     for (const d of ds) dmin = Math.min(dmin, d);
     const ws = ds.map((d) => Math.exp(-(d - dmin) / tau));
     const order = ws.map((w, i) => i).sort((a, b) => ws[b] - ws[a]).slice(0, 4);
     let sum = 0;
     for (const i of order) sum += ws[i];
-    let gx = 0, gy = 0, gz = 0;
-    order.forEach((bi, slot) => {
-      const w = ws[bi] / sum;
-      skinIndex[v * 4 + slot] = bi;
-      skinWeight[v * 4 + slot] = w;
-      gx += grains[bi][0] * w; gy += grains[bi][1] * w; gz += grains[bi][2] * w;
-    });
-    boneDom[v] = order[0];
-    const gl = Math.hypot(gx, gy, gz) || 1;
-    grain.set([gx / gl, gy / gl, gz / gl], v * 3);
-
-    // --- fur length multiplier ---
-    const [x, y, z] = p;
-    let len = 1;
-    const name = BONES[order[0]].name;
-    if (/^ear/.test(name)) len = 0.45;
-    if (/^(fp|hm|fu|ff)/.test(name)) len = 0.55 + 0.45 * smoothstep(0.03, 0.1, y); // shorter on lower legs
-    if (y < 0.03 && /^(fp|hm)/.test(name)) len = 0.25;
-    if (/^tail/.test(name)) len = 1.35;
-    if (/^(chest|neck)/.test(name) && y < 0.23 && x > 0.1) len = 1.5; // chest ruff
-    if (name === 'head' || /^neck2/.test(name)) {
-      len = 0.7;
-      if (z * z > 0.0009 && x < 0.34) len = 1.35 * Math.min(1, Math.abs(z) / 0.04); // cheek ruff
-    }
-    // Face front: very short fur around eyes / muzzle / nose.
-    const de = Math.min(Math.hypot(x - FACE.eyeL[0], y - FACE.eyeL[1], z - FACE.eyeL[2]),
-      Math.hypot(x - FACE.eyeR[0], y - FACE.eyeR[1], z - FACE.eyeR[2]));
-    len *= 0.15 + 0.85 * smoothstep(0.014, 0.045, de);
-    if (x > 0.335 && /^head/.test(name)) len = Math.min(len, 0.25 + 0.75 * smoothstep(0.37, 0.33, x));
-    furLen[v] = len;
+    order.forEach((bi, slot) => { skinIndex[v * 4 + slot] = bi; skinWeight[v * 4 + slot] = ws[bi] / sum; });
   }
   log(`attributes done in ${Date.now() - t0}ms`);
-  return { positions: verts, normals, grain, furLen, boneDom, skinIndex, skinWeight, indices: tris };
+  return { positions: verts, normals, skinIndex, skinWeight, indices: tris };
 }
 
 // Compact binary container: header [magic, nVerts, nIdx] + typed arrays.
 export function packCat(m) {
   const n = m.positions.length / 3, ni = m.indices.length;
-  const header = new Uint32Array([0x43415431, n, ni, 0]);
-  const parts = [header, m.positions, m.normals, m.grain, m.furLen, m.boneDom, m.skinIndex, m.skinWeight, m.indices];
+  const header = new Uint32Array([0x43415432, n, ni, 0]);
+  const parts = [header, m.positions, m.normals, m.skinIndex, m.skinWeight, m.indices];
   const total = parts.reduce((s, a) => s + a.byteLength, 0);
   const out = new Uint8Array(total);
   let o = 0;
@@ -218,13 +174,12 @@ export function packCat(m) {
 
 export function unpackCat(buffer) {
   const h = new Uint32Array(buffer, 0, 4);
-  if (h[0] !== 0x43415431) throw new Error('bad cat model');
+  if (h[0] !== 0x43415432) throw new Error('bad cat model');
   const n = h[1], ni = h[2];
   let o = 16;
   const take = (Type, count) => { const a = new Type(buffer, o, count); o += a.byteLength; return a; };
   return {
-    positions: take(Float32Array, n * 3), normals: take(Float32Array, n * 3), grain: take(Float32Array, n * 3),
-    furLen: take(Float32Array, n), boneDom: take(Float32Array, n),
+    positions: take(Float32Array, n * 3), normals: take(Float32Array, n * 3),
     skinIndex: take(Uint16Array, n * 4), skinWeight: take(Float32Array, n * 4), indices: take(Uint32Array, ni),
   };
 }

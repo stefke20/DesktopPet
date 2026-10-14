@@ -224,13 +224,15 @@ export class CatAnimator {
         this._tail(p, 'rest', 0.3, 1);
         break;
       }
-      case 'hang': { // carried by the scruff
-        p.pitch = -0.6; p.ch[0] = -0.25; p.s1[0] = -0.2; p.n1[0] = 0.5; p.n2[0] = 0.4; p.hd[0] = 0.3;
-        const sw = Math.sin(this.time * 2.6) * 0.06;
-        p.fL = [0.1 + sw, 0.0, 0.05, 0.6]; p.fR = [0.1 + sw, 0.0, -0.05, 0.6];
-        p.hL = [0.0 - sw, -0.02, 0.06, 0.8]; p.hR = [0.0 - sw, -0.02, -0.06, 0.8];
-        p.eye = 0.7; p.pupil = 0.9;
-        this._tail(p, 'hang', 0.1, 1.5);
+      case 'hang': { // carried by the scruff: everything dangles along world-down
+        const d = this.down;
+        const sw = Math.sin(this.time * 2.4) * 0.025;
+        p.pitch = 0.1; p.ch[0] = -0.1; p.n1[0] = -0.3; p.n2[0] = -0.2; p.hd[0] = -0.15;
+        const limb = (x, y, z, len, extra) => [x + d.x * len + extra, y + d.y * len, z, 0.5];
+        p.fL = limb(0.105, 0.19, 0.05, 0.15, sw); p.fR = limb(0.105, 0.19, -0.05, 0.15, -sw);
+        p.hL = limb(-0.1, 0.178, 0.055, 0.2, -sw); p.hR = limb(-0.1, 0.178, -0.055, 0.2, sw);
+        p.eye = 0.55; p.pupil = 0.8;
+        this._tail(p, 'low', 0.08, 1.4);
         this._ears(p, 'back', t);
         break;
       }
@@ -332,7 +334,7 @@ export class CatAnimator {
     // look at target (rig space vector from head)
     const lt = ctx.look;
     let ty = 0, tp = 0;
-    if (lt && !['sleep', 'hang', 'groom', 'yawn'].includes(st)) {
+    if (lt && !['sleep', 'hang', 'groom', 'yawn', 'pet'].includes(st)) {
       const d = new THREE.Vector3(lt.x, lt.y, lt.z === undefined ? 0.35 : lt.z).normalize();
       ty = Math.atan2(-d.z, d.x);
       tp = Math.atan2(d.y, Math.hypot(d.x, d.z));
@@ -365,6 +367,21 @@ export class CatAnimator {
     this.speed = speed;
     const locomoting = (this.state === 'walk' || this.state === 'climb') && speed > 0.02;
 
+    // orientation first: the 3D heading turns *through* the camera, and some poses
+    // (hanging) need "down" expressed in rig space
+    const yawGoal = ctx.yaw === undefined ? this.yawCam : ctx.yaw;
+    this.yawCur += (yawGoal - this.yawCur) * (1 - Math.exp(-5 * dt));
+    const face = ctx.facing === undefined ? this.facing : ctx.facing;
+    this.facing = face;
+    const o = this.view.orient;
+    o.rotation.order = 'ZYX';
+    const goal = face >= 0 ? -this.yawCur : -Math.PI + this.yawCur;
+    this.heading += (goal - this.heading) * (1 - Math.exp(-9 * dt));
+    o.rotation.y = this.heading;
+    o.updateMatrixWorld(true);
+    this.down = this.down || new THREE.Vector3();
+    this.down.set(0, -1, 0).transformDirection(o.matrixWorld.clone().invert());
+
     const tgt = this.target;
     copyPose(tgt, newPose());
     this._applyAction(tgt, dt, ctx);
@@ -392,18 +409,6 @@ export class CatAnimator {
       for (const k of ['fL', 'fR', 'hL', 'hR']) for (let i = 0; i < 4; i++) this.cur[k][i] = lerp(this.cur[k][i], this.gaitFeet[k][i], gw);
     }
 
-    // 3D yaw toward camera
-    const yawGoal = ctx.yaw === undefined ? this.yawCam : ctx.yaw;
-    this.yawCur += (yawGoal - this.yawCur) * (1 - Math.exp(-5 * dt));
-    const face = ctx.facing === undefined ? this.facing : ctx.facing;
-    this.facing = face;
-    const o = this.view.orient;
-    o.rotation.order = 'ZYX';
-    // facing right: -yaw; facing left: -PI + yaw. Interpolating the raw angle
-    // makes the cat turn *through* the camera instead of flipping.
-    const goal = face >= 0 ? -this.yawCur : -Math.PI + this.yawCur;
-    this.heading += (goal - this.heading) * (1 - Math.exp(-9 * dt));
-    o.rotation.y = this.heading;
     this.view.mud = ctx.mud || 0;
 
     this.rig.apply(this.cur);

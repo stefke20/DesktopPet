@@ -22,6 +22,36 @@ const adv = (sec, step = 1 / 60) => page.evaluate(([s, st]) => { for (let t = 0;
 const info = () => page.evaluate(() => { const b = window.app.brain; return { t: +b.time.toFixed(1), x: Math.round(b.x), y: Math.round(b.y), mode: b.mode, anim: b.anim.state, sup: b.support && b.support.id, mud: +b.mud.toFixed(2), prints: window.app.mudLayer.count, icons: b.icons.bodies.size, act: b.lastActivity }; });
 
 const scenarios = {
+  async interact() {
+    // keep the cat still on the floor so we can poke at it
+    await page.evaluate(() => { const b = window.app.brain; b.x = 640; b.y = 680; b.mode = 'ground'; b.attachTo('floor'); b.task = (function* () { while (true) { b.setAnim('stand'); yield; } })(); });
+    await adv(0.5);
+    const head = await page.evaluate(() => { const a = window.app; const v = a.view.bones.chest.getWorldPosition(new a._tmp.constructor()); return { x: a.brain.x + v.x * a.S, y: a.brain.y - v.y * a.S }; });
+    console.log('chest at', JSON.stringify(head));
+    // 1) hover slowly -> petting
+    for (let k = 0; k < 90; k++) { await page.evaluate(([x, y, k]) => { window.__fake.cursor(x + Math.sin(k / 8) * 6, y); window.app.tick(1 / 60, false); }, [head.x, head.y, k]); }
+    console.log('hover:', JSON.stringify(await info()), 'interactive=', await page.evaluate(() => window.__interactive));
+    await shot('1-petting');
+    // 2) press + drag -> picked up by the scruff
+    await page.mouse.move(head.x, head.y);
+    await page.mouse.down();
+    for (let k = 1; k <= 12; k++) { await page.mouse.move(head.x + k * 6, head.y - k * 12); await page.evaluate(([x, y]) => { window.__fake.cursor(x, y); window.app.tick(1 / 60, false); }, [head.x + k * 6, head.y - k * 12]); }
+    await adv(0.5);
+    console.log('dragging:', JSON.stringify(await info()));
+    await shot('2-held');
+    await page.mouse.up();
+    await adv(0.2);
+    console.log('released:', JSON.stringify(await info()));
+    await adv(1.5);
+    console.log('landed:', JSON.stringify(await info()));
+    // 3) quick click -> meow
+    await page.evaluate(() => { const b = window.app.brain; b.task = (function* () { while (true) { b.setAnim('stand'); yield; } })(); });
+    const p2 = await page.evaluate(() => { const a = window.app; const v = a.view.bones.chest.getWorldPosition(new a._tmp.constructor()); return { x: a.brain.x + v.x * a.S, y: a.brain.y - v.y * a.S }; });
+    await page.evaluate(([x, y]) => { window.__fake.cursor(x, y); window.app.tick(1 / 60, false); }, [p2.x, p2.y]);
+    await page.mouse.move(p2.x, p2.y); await page.mouse.down(); await page.mouse.up();
+    await adv(0.3);
+    console.log('clicked:', JSON.stringify(await info()));
+  },
   async mud() {
     await page.evaluate(() => { const b = window.app.brain; b.settings.perch = false; b.settings.playWithIcons = false; b.settings.chase = false; b.cool.mud = 0; b.cool.perch = 999; });
     for (let i = 0; i < 40; i++) { await adv(2); const f = await info(); if (i % 4 === 0) console.log(JSON.stringify(f)); if (f.prints > 6) { await adv(3); break; } }
