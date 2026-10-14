@@ -40,6 +40,9 @@ class WinBridge {
     const src = fs.readFileSync(this.sourcePath);
     const hash = crypto.createHash('sha1').update(src).digest('hex').slice(0, 12);
     fs.mkdirSync(this.cacheDir, { recursive: true });
+    // csc.exe can't read from inside app.asar, so compile a plain copy of the source
+    const srcCopy = path.join(this.cacheDir, `PetBridge-${hash}.cs`);
+    if (!fs.existsSync(srcCopy)) fs.writeFileSync(srcCopy, src);
     const wpf = path.join(found.dir, 'WPF');
     const attempts = [
       { tag: 'uia', args: ['/define:UIA', `/lib:${wpf}`, '/r:UIAutomationClient.dll', '/r:UIAutomationTypes.dll', '/r:WindowsBase.dll'] },
@@ -50,7 +53,7 @@ class WinBridge {
       const out = path.join(this.cacheDir, `PetBridge-${hash}-${a.tag}.exe`);
       if (fs.existsSync(out)) return out;
       try {
-        await run(found.csc, ['/nologo', '/optimize+', '/target:exe', `/out:${out}`, '/r:System.Drawing.dll', ...a.args, this.sourcePath]);
+        await run(found.csc, ['/nologo', '/optimize+', '/target:exe', `/out:${out}`, '/r:System.Drawing.dll', ...a.args, srcCopy]);
         return out;
       } catch (e) { lastErr = e; this.log(`bridge compile (${a.tag}) failed: ${e.message.split('\n')[0]}`); }
     }
@@ -63,6 +66,7 @@ class WinBridge {
     this.proc.stdout.setEncoding('utf8');
     this.proc.stdout.on('data', (d) => this._onData(d));
     this.proc.stderr.on('data', (d) => this.log('bridge stderr: ' + d));
+    this.proc.stdin.on('error', () => { /* helper exited; requests will time out */ });
     this.proc.on('exit', (code) => { this.ready = false; this.log('bridge exited ' + code); for (const p of this.pending.values()) p.reject(new Error('bridge exited')); this.pending.clear(); });
     const ping = await this.request('ping', [], 15000);
     this.uia = !!ping.uia;

@@ -20,7 +20,8 @@ if (process.platform !== 'win32' && SELFTEST) {
 }
 app.setName('DesktopPet');
 app.setPath('userData', path.join(app.getPath('appData'), 'DesktopPet'));
-if (!app.requestSingleInstanceLock()) { app.quit(); }
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.exit(0);
 
 let win = null, tray = null, bridge = null, settings = null, store = null;
 let display = null, conv = null;
@@ -54,7 +55,7 @@ function makeConverter(d) {
 
 function displayInfo() {
   const d = display;
-  return { width: d.bounds.width, height: d.bounds.height, floorY: d.workArea.y + d.workArea.height - d.bounds.y, dpr: d.scaleFactor };
+  return { width: d.bounds.width, height: d.bounds.height - 1, floorY: d.workArea.y + d.workArea.height - d.bounds.y, dpr: d.scaleFactor };
 }
 
 const rectDip = (x, y, w, h) => { const a = conv.dip(x, y); return { x: a.x, y: a.y, w: w / conv.sf, h: h / conv.sf }; };
@@ -65,7 +66,7 @@ function createOverlay() {
   conv = makeConverter(display);
   const b = display.bounds;
   win = new BrowserWindow({
-    x: b.x, y: b.y, width: b.width, height: b.height,
+    x: b.x, y: b.y, width: b.width, height: b.height - 1,   // 1px short: never looks like a fullscreen app
     transparent: true, frame: false, resizable: false, movable: false, focusable: false,
     skipTaskbar: true, alwaysOnTop: true, hasShadow: false, show: false, fullscreenable: false,
     title: 'DesktopPetOverlay', backgroundColor: '#00000000',
@@ -77,7 +78,12 @@ function createOverlay() {
   win.loadFile(path.join(__dirname, '..', '..', 'dist', 'index.html'));
   win.once('ready-to-show', () => win.showInactive());
   win.webContents.on('render-process-gone', (_e, d) => log('renderer gone', JSON.stringify(d)));
-  win.webContents.on('console-message', (_e, level, msg) => { if (level >= 2 || SELFTEST) log('[renderer]', msg); });
+  win.webContents.on('console-message', (event, level, message) => {
+    // Electron >= 35 passes one details object; older versions pass (level, message, ...)
+    const msg = typeof event.message === 'string' ? event.message : message;
+    const lv = event.level !== undefined ? event.level : level;
+    if (SELFTEST || lv === 2 || lv === 3 || lv === 'warning' || lv === 'error') log('[renderer]', msg);
+  });
 }
 
 function send(channel, payload) { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); }
@@ -86,8 +92,9 @@ function send(channel, payload) { if (win && !win.isDestroyed()) win.webContents
 function loop(name, fn, delay) {
   const tick = async () => {
     if (quitting) return;
-    try { await fn(); } catch (e) { if (timers[name + 'Err'] !== e.message) { timers[name + 'Err'] = e.message; log(`${name}:`, e.message); } }
-    timers[name] = setTimeout(tick, delay);
+    let next = delay;
+    try { const r = await fn(); if (typeof r === 'number') next = r; } catch (e) { if (timers[name + 'Err'] !== e.message) { timers[name + 'Err'] = e.message; log(`${name}:`, e.message); } }
+    timers[name] = setTimeout(tick, next);
   };
   tick();
 }
@@ -105,18 +112,25 @@ async function pollWindows() {
   if (key !== lastWinKey) { lastWinKey = key; state.windows = wins; send('state', { windows: wins }); }
 }
 
+// UI Automation scans make browsers build their accessibility tree, so scan sparingly and
+// back off when a window is slow to enumerate.
+const FIELD_MIN_DELAY = 2500;
 async function pollFields() {
   let defs = [];
+  let delay = FIELD_MIN_DELAY;
   if (bridge.uia && settings.get('perch') && !settings.get('paused')) {
     const fg = state.windows.find((w) => w.focused && !w.fullscreen);
     if (fg) {
+      const t0 = Date.now();
       const fields = await bridge.fields(fg.hwnd);
+      delay = Math.min(20000, Math.max(FIELD_MIN_DELAY, (Date.now() - t0) * 5));
       defs = fields.map((f) => { const r = rectDip(f.x, f.y, f.w, f.h); return { winId: fg.id, rx: Math.round(r.x - fg.x), ry: Math.round(r.y - fg.y), w: Math.round(r.w), h: Math.round(r.h) }; })
         .filter((d) => d.ry > 24);
     }
   }
   const key = JSON.stringify(defs);
   if (key !== lastFieldKey) { lastFieldKey = key; state.fields = defs; send('state', { fields: defs }); }
+  return delay;
 }
 
 async function pollIcons() {
@@ -252,6 +266,7 @@ function buildMenu() {
 function createTray() {
   tray = new Tray(nativeImage.createFromBuffer(catIcon(32)));
   tray.setToolTip('DesktopPet');
+  tray.on('click', () => tray.popUpContextMenu());
   buildMenu();
 }
 
@@ -301,7 +316,7 @@ async function selftest() {
   app.exit(info && !info.error ? 0 : 1);
 }
 
-app.whenReady().then(async () => {
+if (gotLock) app.whenReady().then(async () => {
   const userData = app.getPath('userData');
   logFile = path.join(userData, 'desktoppet.log');
   settings = new Settings(userData);
@@ -312,14 +327,14 @@ app.whenReady().then(async () => {
   await startBridge();
   startCursorLoop();
   loop('windows', pollWindows, 33);
-  loop('fields', pollFields, 700);
-  loop('icons', pollIcons, 1200);
+  loop('fields', pollFields, FIELD_MIN_DELAY);
+  loop('icons', pollIcons, 2000);
   recoverIcons();
   globalShortcut.register('CommandOrControl+Alt+R', () => resetIcons(true));
   if (settings.get('autostart')) { try { app.setLoginItemSettings({ openAtLogin: true }); } catch { /* ignore */ } }
   screen.on('display-metrics-changed', () => {
     display = screen.getPrimaryDisplay(); conv = makeConverter(display);
-    win.setBounds(display.bounds);
+    win.setBounds({ ...display.bounds, height: display.bounds.height - 1 });
     send('state', { display: displayInfo() });
   });
   if (SELFTEST) selftest();
