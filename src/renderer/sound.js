@@ -45,6 +45,35 @@ export class CatSound {
     burst(0, 330); if (Math.random() < 0.7) burst(0.24, 300);
   }
 
+  /** Cats chattering at a bird: a rapid little "ek-ek-ek". */
+  chatter() {
+    if (!this.enabled || !this._ensure()) return;
+    const c = this.ctx;
+    for (let i = 0; i < 5; i++) {
+      const t = c.currentTime + i * 0.085, dur = 0.05;
+      const o = c.createOscillator(); o.type = 'square';
+      o.frequency.setValueAtTime(1300 + Math.random() * 200, t); o.frequency.exponentialRampToValueAtTime(900, t + dur);
+      const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1600; bp.Q.value = 4;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(bp); bp.connect(g); g.connect(c.destination); o.start(t); o.stop(t + dur + 0.02);
+    }
+  }
+
+  /** Two-tone doorbell. */
+  ding() {
+    if (!this.enabled || !this._ensure()) return;
+    const c = this.ctx;
+    for (const [f, at] of [[880, 0], [659, 0.45]]) {
+      const t = c.currentTime + at;
+      const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+      const o2 = c.createOscillator(); o2.type = 'sine'; o2.frequency.value = f * 2.01;
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+      const g2 = c.createGain(); g2.gain.value = 0.25;
+      o.connect(g); o2.connect(g2); g2.connect(g); g.connect(c.destination);
+      o.start(t); o2.start(t); o.stop(t + 1); o2.stop(t + 1);
+    }
+  }
+
   purr(on) {
     if (!on) {
       if (this.purrNodes) { const { src, g } = this.purrNodes; const t = this.ctx.currentTime; g.gain.cancelScheduledValues(t); g.gain.linearRampToValueAtTime(0, t + 0.4); setTimeout(() => { try { src.stop(); } catch { /* ignore */ } }, 500); this.purrNodes = null; }

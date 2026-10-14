@@ -57,18 +57,25 @@ Swapping keeps the position; mid-air or on a wall the new pet just drops to the 
 
 ## Random events
 
-A visitor arrives every couple of minutes (you can turn this off in the tray: *What the pet may do → Random events*, or
-trigger one with *Surprise me*):
+A visitor arrives every couple of minutes (turn this off in the tray: *What the pet may do → Random events*, or trigger one
+yourself with *Surprise me*). Every prop is 3-D / toon-styled and **sized relative to the pet** — a butterfly about as wide as its
+head, a ball the size of its head, a mouse a fifth of its body length — so they scale when you change the pet's size or swap
+species. Which visitor shows up depends on who is on the desktop:
 
-* **Butterfly** — a toon butterfly enters from a screen edge and flutters erratically. The pet freezes, stares, stalks
-  it along the surface it is standing on, crouches with a wiggle, pounces — and the butterfly slips away at the last
-  moment. After 2–4 failed attempts the butterfly leaves and the pet sulks briefly. (If it flies too high the pet just
-  watches.)
-* **Ball of yarn** — a striped ball rolls in from the side and the pet bats it back and forth with real rolling physics
-  (the same engine that tumbles your desktop icons), until it gets bored and the ball fades away.
+| Event | What happens | Cat | Dog |
+| --- | --- | --- | --- |
+| 🦋 **Butterfly** | flutters erratically; the pet freezes, stalks, crouches, pounces — it slips away at the last moment. After 2–4 failed tries it leaves and the pet sulks | ✓ | ✓ barks |
+| 🧶 **Toy** | a ball rolls in and is batted around with real rolling physics, then fades | ball of **yarn** | **tennis ball** |
+| 🔴 **Laser dot** | a red dot skitters along surfaces (and hops between windows); the pet chases it, waits for it to pause, pounces — it zips off. It's switched off when the pet is confused enough | likes it | ✓ |
+| 🐭 **Toy mouse** | zig-zags along the taskbar, freezes, bolts whenever the pet gets close; escapes off-screen after a few missed pounces | favourite | ✓ |
+| 🐦 **Bird** | flies across the top of the screen (the pet watches and chatters/barks) — sometimes lands on a window edge. If the pet can get there it creeps up, wiggles… and the bird flies off | ✓ | ✓ |
+| 🔔 **Doorbell** | a comic "DING-DONG!" bubble pops up at a screen edge. The dog sprints over and barks; the cat stares, puffs its tail and backs away | wary | ecstatic |
 
-Events are an extensible list (`src/shared/sim/events.js`): add a type, a `trigger` case, and a renderer in
-`src/renderer/props/`.
+If the pet is asleep, being petted, held, or playing with your icons when a visitor arrives, it may ignore it; an event that
+arrives while the pet is mid-jump is delivered as soon as it lands.
+
+Events are an extensible list (`src/shared/sim/events.js`): add an entity class, a `trigger` case, a reaction routine in
+`brain.js`, and a renderer in `src/renderer/props/`.
 
 ## What the pet interacts with
 
@@ -106,7 +113,7 @@ start). If *Auto arrange icons* is on, Windows would undo any move, so the cat l
 src/shared/cat/      procedural cat + dog: signed-distance-field body -> surface-nets mesh -> skin weights (rig-def.js = skeletons)
 src/shared/species.cjs per-species traits (jump height, climbing, sounds) and coat lists
 src/renderer/cat/    Three.js view (PetView/Character, toon shader + outline + eyes), IK rig, pose/gait animator
-src/renderer/props/  3-D toon event props (butterfly, yarn ball)
+src/renderer/props/  3-D toon event props (butterfly, yarn / tennis ball, mouse, bird); laser dot + doorbell bubble live in overlay/props.js
 src/shared/sim/      pure-JS simulation: world (windows, occlusion), navigation, behaviour "brain", icon physics, random events
 src/renderer/        overlay app: input, paw-print layer, props, hand-off to the native bridge
 src/main/            Electron main: transparent click-through overlay, tray, polling, icon bookkeeping
@@ -130,8 +137,9 @@ test/                node:test unit + soak tests
 npm test                         # unit + soak tests
 npm run build                    # bundle the renderer, regenerate dist/cat.bin when the cat code changes
 node tools/sheet.mjs out.png '[{"state":"sit","seconds":1.5}]' 2     # pose contact sheet
-node tools/scenario.mjs icons    # fast-forward a scenario in headless Chromium (mud | icons | interact | butterfly | yarn | soak)
-SPECIES=dog SWAP_EVERY=45 node tools/scenario.mjs soak     # soak test, optionally dog / swapping species
+node tools/scenario.mjs icons    # fast-forward a scenario in headless Chromium (mud | icons | interact | butterfly | yarn | event | soak)
+SCN_EVENT=laser node tools/scenario.mjs event      # watch one event: butterfly | toy | laser | mouse | bird | visitor
+SPECIES=dog SWAP_EVERY=45 FAST_EVENTS=1 node tools/scenario.mjs soak     # soak: dog / swapping species / events every 25 s
 npm run selftest                 # Electron smoke test (use xvfb on Linux)
 npm run pack                     # Windows installer via electron-builder
 ```

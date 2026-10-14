@@ -50,6 +50,7 @@ export class CatBrain {
     this.pending = null;
     this.task = this.life();
     this._dt = 1 / 60;
+    this._frame = 0;
   }
 
   // ------------------------------------------------------------------ config
@@ -129,6 +130,7 @@ export class CatBrain {
   update(dt) {
     dt = Math.min(dt, 0.05);
     this._dt = dt;
+    this._frame++;
     this.time += dt;
     for (const k in this.cool) this.cool[k] -= dt;
     this.icons.step(dt);
@@ -143,6 +145,11 @@ export class CatBrain {
     let r;
     try { r = this.task.next(); } catch (e) { console.error('[brain]', e); r = { done: true }; this._reset(); }
     if (r.done) this.task = this.life();
+    if (this.queuedEvent) {
+      const q = this.queuedEvent;
+      if (this.time > q.until || q.ev.done) this.queuedEvent = null;
+      else if (this.mode === 'ground' && this.support && !this.pending) { this.queuedEvent = null; this.onEvent(q.ev); }
+    }
     this._ground();
     // safety net: whatever happened, the cat never ends up below the floor
     if (this.y > this.world.floorY + 4) {
@@ -237,7 +244,14 @@ export class CatBrain {
   }
 
   /** Walk (or run) along the current surface to x. */
-  *walkTo(tx, { run = false, tol = 4, timeout = 14 } = {}) {
+  *walkTo(tx, opts) {
+    const f0 = this._frame;
+    const ok = yield* this._walkTo(tx, opts);
+    if (this._frame === f0) yield;      // already there (or can't go): still spend a frame, see goTo
+    return ok;
+  }
+
+  *_walkTo(tx, { run = false, tol = 4, timeout = 14 } = {}) {
     let t = 0;
     while (t < timeout) {
       const s = this.support;
@@ -405,6 +419,13 @@ export class CatBrain {
 
   /** Execute a planned route to surface `toId`. Returns true on arrival. */
   *goTo(toId, toX) {
+    const f0 = this._frame;
+    const ok = yield* this._goTo(toId, toX);
+    if (this._frame === f0) yield;      // every call must cost a frame, or retry loops would freeze the app
+    return ok;
+  }
+
+  *_goTo(toId, toX) {
     for (let attempt = 0; attempt < 3; attempt++) {
       if (this.mode !== 'ground' || !this.support) return false;
       const target = this.world.getSurface(toId);
@@ -915,12 +936,18 @@ export class CatBrain {
   // ------------------------------------------------------------------ random events
   /** A visitor arrived (butterfly, yarn ball ...). The pet may drop what it is doing. */
   onEvent(ev) {
+    const airborne = (this.mode === 'air' || this.mode === 'wall') && !this.held;
+    if (airborne) { this.queuedEvent = { ev, until: this.time + 5 }; return; }   // deliver it once we land
     const busy = this.mode !== 'ground' || this.held || this.petting || this.iconSession;
     if (busy) return;
     const sleeping = this.anim.state === 'sleep';
     if (sleeping && this.rng.chance(0.5)) return;       // sound asleep: ignores it
     if (ev.type === 'butterfly') { this.butterfly = ev; this.interrupt(this.chaseButterfly(ev)); }
-    else if (ev.type === 'yarn') { this.interrupt(this.playWithBall(ev)); }
+    else if (ev.type === 'toy') this.interrupt(this.playWithBall(ev));
+    else if (ev.type === 'laser') this.interrupt(this.chaseLaser(ev));
+    else if (ev.type === 'mouse') this.interrupt(this.chaseMouse(ev));
+    else if (ev.type === 'bird') this.interrupt(this.watchBird(ev));
+    else if (ev.type === 'visitor') this.interrupt(this.isDog ? this.answerDoor(ev) : this.eyeDoor(ev));
   }
 
   onEventEnd(ev) { if (this.butterfly === ev) this.butterfly = null; if (this.lookAt && this.lookAt.event === ev) this.lookAt = null; }
@@ -998,6 +1025,165 @@ export class CatBrain {
     this.activeToy = null;
     this.lookAt = null;
     yield* this.wait(1.0, 'sit');
+  }
+
+  /** Run along the surface toward x (stops at the surface edge). Yields once per frame; returns true when there. */
+  *_runToward(tx, { slow = false, tol = 6 } = {}) {
+    const s = this.support;
+    if (!s) { yield; return false; }
+    const m = 0.05 * this.U;
+    tx = clamp(tx, s.x1 + m, s.x2 - m);
+    const dx = tx - this.x;
+    if (Math.abs(dx) <= tol) { yield; return true; }       // always spend a frame: callers loop on this
+    const dir = Math.sign(dx);
+    if (dir !== this.facing) yield* this.turn(dir);
+    const sp = slow ? this.mp.walk * 0.5 : this.mp.run * (Math.abs(dx) > 2 * this.U ? 1 : 0.65);
+    this.x += dir * Math.min(sp * this.dt, Math.abs(dx));
+    this.setAnim('walk', {}, { speed: sp });
+    yield;
+    return false;
+  }
+
+  /** Chase a laser dot: it pauses, you crouch, you pounce, it zips off. */
+  *chaseLaser(l) {
+    const maxAttempts = this.rng.pick([3, 4, 4, 5]);
+    let attempts = 0, idle = 0;
+    this.events.push({ type: 'notice', what: 'laser' });
+    if (this.isDog) this.events.push({ type: 'bark' });
+    const look = () => { this.lookAt = { x: l.x, y: l.y, event: l }; };
+    for (let t = 0; t < 0.6 && !l.done; t += this.dt) { look(); this.setAnim('stand', { ears: 'alert' }); yield; if (this.mode !== 'ground') return; }
+    while (!l.done && attempts < maxAttempts && this.mode === 'ground' && this.support) {
+      look();
+      if (this.support.owner !== l.owner) {
+        const target = this.world.horizontals().find((q) => q.owner === l.owner && l.x >= q.x1 && l.x <= q.x2);
+        if (target && plan(this.world, this.support.id, target.id, this.mp, this.x)) { yield* this.goTo(target.id, l.x); continue; }
+        this.setAnim('sit', { ears: 'alert' }); idle += this.dt; yield;      // can't get there: just watch
+        if (idle > 5) break;
+        continue;
+      }
+      idle = 0;
+      const dx = l.x - this.x;
+      if (Math.abs(dx) > 0.9 * this.U) { yield* this._runToward(l.x - Math.sign(dx) * 0.6 * this.U); continue; }
+      const dir = Math.sign(dx) || this.facing;
+      if (dir !== this.facing) yield* this.turn(dir);
+      if (l.state !== 'rest') { this.setAnim('crouch', { wiggle: true, amount: 0.8 }); yield; continue; }   // wait for it to pause
+      for (let t = 0, d = this.rng.range(0.45, 0.8); t < d && !l.done && l.state === 'rest'; t += this.dt) { look(); this.setAnim('crouch', { wiggle: true, amount: 1 }); yield; }
+      if (l.done || this.mode !== 'ground') break;
+      yield* this.pounce(l.x, l.y, { onSwipe: () => { l.dodge(this.x); this.events.push({ type: 'miss' }); } });
+      attempts++;
+      for (let t = 0; t < 0.9 && !l.done; t += this.dt) { look(); this.setAnim('stand', { ears: 'back' }); yield; if (this.mode !== 'ground') return; }
+    }
+    l.t = Math.max(l.t, l.life);     // the pointer is switched off
+    this.lookAt = null;
+    if (this.mode === 'ground') { yield* this.wait(1.4, 'sit', { tail: 'question' }); }
+  }
+
+  /** Stalk a toy mouse along the floor; it always bolts at the last second. */
+  *chaseMouse(m) {
+    const maxAttempts = this.rng.pick([2, 3, 3]);
+    let attempts = 0, watch = 0;
+    this.events.push({ type: 'notice', what: 'mouse' });
+    if (this.isDog) this.events.push({ type: 'bark' });
+    const look = () => { this.lookAt = { x: m.x, y: m.y, event: m }; };
+    for (let t = 0; t < 0.8 && !m.done; t += this.dt) { look(); this.setAnim('crouch', { amount: 0.5 }); yield; if (this.mode !== 'ground') return; }
+    if (this.support && this.support.id !== 'floor') { const ok = yield* this.goTo('floor'); if (!ok) { this.lookAt = null; return; } }
+    while (!m.done && attempts < maxAttempts && this.mode === 'ground' && this.support) {
+      look();
+      if (this.support.id !== 'floor') break;
+      const dx = m.x - this.x;
+      if (m.x < 0 || m.x > this.world.width) { this.setAnim('crouch', { amount: 0.5 }); yield; watch += this.dt; if (watch > 4) break; continue; }
+      if (Math.abs(dx) > 1.1 * this.U) { yield* this._runToward(m.x - Math.sign(dx) * 0.8 * this.U); continue; }
+      const dir = Math.sign(dx) || this.facing;
+      if (dir !== this.facing) yield* this.turn(dir);
+      for (let t = 0, d = this.rng.range(0.5, 0.9); t < d && !m.done; t += this.dt) { look(); this.setAnim('crouch', { wiggle: true, amount: 1 }); yield; }
+      if (m.done || this.mode !== 'ground') break;
+      yield* this.pounce(m.x, m.y - 0.1 * this.U, { onSwipe: () => { m.dodge(this.x); this.events.push({ type: 'miss' }); } });
+      attempts++;
+      for (let t = 0; t < 0.7 && !m.done; t += this.dt) { look(); this.setAnim('stand', { ears: 'back' }); yield; if (this.mode !== 'ground') return; }
+    }
+    m.dodges = Math.max(m.dodges, 4);    // the mouse has had enough and leaves
+    for (let t = 0; t < 1.5 && !m.done && this.mode === 'ground'; t += this.dt) { look(); this.setAnim('stand', { ears: 'alert' }); yield; }
+    this.lookAt = null;
+    if (this.mode === 'ground') yield* this.sniffAround();
+  }
+
+  /** A bird: watch it fly over; if it lands somewhere reachable, creep up on it (it flies off). */
+  *watchBird(bd) {
+    this.events.push({ type: 'notice', what: 'bird' });
+    const look = () => { this.lookAt = { x: bd.x, y: bd.y, event: bd }; };
+    const chatter = (every) => { this._chat = (this._chat || 0) - this.dt; if (this._chat <= 0) { this._chat = every; this.events.push({ type: this.isDog ? 'bark' : 'chatter' }); } };
+    let stalking = false, creeping = 0;
+    const end = this.time + 25;
+    while (!bd.done && this.mode === 'ground' && this.support && this.time < end) {
+      look();
+      if (bd.state === 'perched' && !stalking) {
+        // can we get to it?
+        const target = this.world.horizontals().find((q) => q.owner === bd.perch.owner && q.kind === 'top' && bd.x >= q.x1 && bd.x <= q.x2);
+        if (target && (this.support.id === target.id || plan(this.world, this.support.id, target.id, this.mp, this.x))) {
+          stalking = true;
+          if (this.support.id !== target.id) {
+            yield* this.goTo(target.id, clamp(bd.x - Math.sign(bd.x - this.x || 1) * 3 * this.U, target.x1 + 0.3 * this.U, target.x2 - 0.3 * this.U));
+            if (this.mode !== 'ground') return;
+          }
+          continue;
+        }
+      }
+      if (stalking && bd.state === 'perched' && this.support.owner === bd.perch.owner) {
+        const dx = bd.x - this.x;
+        const dir = Math.sign(dx) || this.facing;
+        if (dir !== this.facing) yield* this.turn(dir);
+        if (Math.abs(dx) > 1.5 * this.U) { chatter(2.2); yield* this._runToward(bd.x - dir * 1.4 * this.U, { slow: true }); continue; }
+        // within pouncing range: wiggle, then leap; the bird flies off
+        for (let t = 0, d = this.rng.range(0.7, 1.1); t < d && bd.state === 'perched'; t += this.dt) { look(); chatter(0.5); this.setAnim('crouch', { wiggle: true, amount: 1 }); yield; }
+        if (bd.state === 'perched') {
+          yield* this.pounce(bd.x, bd.y, { onSwipe: () => { bd.flush(this.x); this.events.push({ type: 'miss' }); } });
+          creeping++;
+        }
+        if (creeping >= 1) break;
+        continue;
+      }
+      // in the air / not reachable: sit and stare, chattering
+      this.setAnim(bd.state === 'perched' ? 'crouch' : 'sit', { ears: 'alert', tail: 'question', amount: 0.5, wiggle: bd.state === 'perched' });
+      chatter(bd.state === 'perched' ? 1.2 : 3);
+      yield;
+    }
+    for (let t = 0; t < 2.2 && !bd.done && this.mode === 'ground'; t += this.dt) { look(); this.setAnim('sit', { ears: 'alert' }); yield; }
+    this.lookAt = null;
+    if (this.mode === 'ground') yield* this.wait(1.2, 'stand', { tail: 'question' });
+  }
+
+  /** Dogs go crazy at the doorbell. */
+  *answerDoor(v) {
+    this.events.push({ type: 'notice', what: 'doorbell' });
+    this.events.push({ type: 'ding' });
+    if (this.support && this.support.id !== 'floor') { const ok = yield* this.goTo('floor'); if (!ok) return; }
+    this.lookAt = { x: v.x, y: v.y + this.U, event: v };
+    yield* this.wait(0.6, 'stand', { ears: 'alert' });
+    const s = this.support;
+    if (!s) return;
+    const doorX = clamp(v.x + (v.side === 'L' ? 1 : -1) * 0.9 * this.U, s.x1 + 0.06 * this.U, s.x2 - 0.06 * this.U);
+    this.events.push({ type: 'bark' });
+    for (let i = 0; i < 400 && Math.abs(doorX - this.x) > 8 && this.mode === 'ground'; i++) yield* this._runToward(doorX);
+    const face = v.side === 'L' ? -1 : 1;
+    if (this.facing !== face) yield* this.turn(face);
+    for (let i = 0; i < 3 && this.mode === 'ground'; i++) { this.events.push({ type: 'bark' }); yield* this.wait(0.9, 'bark'); yield* this.wait(0.35, 'stand'); }
+    yield* this.wait(1.4, 'sit', { tail: 'up' });
+    this.lookAt = null;
+  }
+
+  /** Cats eye the door suspiciously and back away. */
+  *eyeDoor(v) {
+    this.events.push({ type: 'notice', what: 'doorbell' });
+    this.events.push({ type: 'ding' });
+    this.lookAt = { x: v.x, y: v.y + this.U, event: v };
+    yield* this.wait(2.6, 'stand', { ears: 'alert', tail: 'puff' });
+    const s = this.support;
+    if (s && this.mode === 'ground') {
+      const away = v.side === 'L' ? 1 : -1;
+      yield* this.walkTo(clamp(this.x + away * 2 * this.U, s.x1, s.x2));
+    }
+    yield* this.wait(2.2, 'sit', { ears: 'back' });
+    this.lookAt = null;
   }
 
   /** Called by the renderer each time a paw print is stamped. */

@@ -38,6 +38,23 @@ const scenarios = {
     }
     console.log('captured', JSON.stringify(got));
   },
+  async event() {
+    // SCN_EVENT=laser|mouse|bird|visitor|toy|butterfly : trigger and take periodic frames
+    const name = process.env.SCN_EVENT || 'laser';
+    await page.evaluate(() => { const b = window.app.brain; b.settings.perch = false; b.settings.playWithIcons = false; b.settings.mud = false; window.app.director.timer = 1e9; });
+    await page.evaluate(() => window.__fake.cursor(4, 4));
+    for (let k = 0; k < 40; k++) { await adv(0.5); if (await page.evaluate(() => window.app.brain.mode === 'ground' && !!window.app.brain.support)) break; }
+    await page.evaluate((n) => window.app.director.trigger(n), name);
+    let n = 0;
+    for (let i = 0; i < 400; i++) {
+      await adv(0.25);
+      await page.evaluate(() => window.__fake.cursor(4, 4));
+      const f = await page.evaluate(() => { const a = window.app, b = a.brain, e = a.director.active[0]; return { t: +b.time.toFixed(1), anim: b.anim.state, x: Math.round(b.x), ev: e ? [e.type, Math.round(e.x || (e.body && e.body.x) || 0), Math.round(e.y || (e.body && e.body.y) || 0), e.state || ''] : null }; });
+      if (i % 12 === 0) console.log(JSON.stringify(f));
+      if (i % 6 === 0 && f.ev) await shot(String(n++).padStart(2, '0') + '-' + f.anim);
+      if (!f.ev) break;
+    }
+  },
   async yarn() {
     await page.evaluate(() => { const b = window.app.brain; b.settings.perch = false; b.settings.playWithIcons = false; b.settings.mud = false; window.app.director.timer = 1e9; });
     await page.evaluate(() => window.app.director.trigger('yarn'));
@@ -45,12 +62,13 @@ const scenarios = {
     for (let i = 0; i < 60; i++) { await adv(0.5); if (i % 4 === 3) await shot(String(n++).padStart(2, '0')); }
   },
   async soak() {
-    const res = await page.evaluate((swapEvery) => {
+    const res = await page.evaluate(([swapEvery, fastEvents, simSeconds]) => {
       const a = window.app, b = a.brain, seen = {}, modes = {}, bad = [];
       let maxAir = 0, air = 0;
-      for (let t = 0; t < 1800; t += 1 / 30) {
+      for (let t = 0; t < simSeconds; t += 1 / 30) {
         // a wandering cursor, sometimes fast
         if (swapEvery && Math.abs(t % swapEvery) < 1 / 30) a.applySettings({ species: a.settings.species === 'cat' ? 'dog' : 'cat' });
+        if (fastEvents && a.director.active.length === 0 && t % 25 < 1 / 30) { const ev = a.director.trigger(); if (ev) seen['event:' + ev.type] = (seen['event:' + ev.type] || 0) + 1; }
         const k = t * 0.7;
         window.__fake.cursor(640 + Math.sin(k) * 500 + Math.sin(k * 3.1) * 90, 360 + Math.cos(k * 0.8) * 250);
         a.tick(1 / 30, false);
@@ -65,7 +83,7 @@ const scenarios = {
         if (!Number.isFinite(b.x) || b.y > 700 || b.x < -5 || b.x > 1285) bad.push(`pos ${b.x.toFixed(0)},${b.y.toFixed(0)}@${t.toFixed(1)} mode=${b.mode} anim=${b.anim.state} act=${b.lastActivity} owner=${b.attach.owner} wall=${b.wall && b.wall.id} rotZ=${b.rotZ.toFixed(2)}`);
       }
       return { seen, modes, bad: bad.slice(0, 10), maxAir: +maxAir.toFixed(1), prints: a.mudLayer.count, parked: a.parked.size, bodies: b.icons.bodies.size };
-    }, Number(process.env.SWAP_EVERY || 0));
+    }, [Number(process.env.SWAP_EVERY || 0), !!process.env.FAST_EVENTS, Number(process.env.SIM_SECONDS || 1800)]);
     console.log(JSON.stringify(res, null, 1));
   },
   async interact() {

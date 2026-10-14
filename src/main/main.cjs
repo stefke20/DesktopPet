@@ -254,7 +254,7 @@ function buildMenu() {
         toggle('Chase the mouse cursor', 'chase'),
         toggle('Walk in mud (paw prints)', 'mud'),
         toggle('Take naps', 'sleep'),
-        toggle('Random events (butterflies, yarn ...)', 'events'),
+        toggle('Random events (butterfly, laser, mouse, bird ...)', 'events'),
       ],
     },
     {
@@ -262,7 +262,11 @@ function buildMenu() {
       submenu: [
         { label: 'A random visitor', click: () => send('command', { type: 'event' }) },
         { label: 'Butterfly', click: () => send('command', { type: 'event', name: 'butterfly' }) },
-        { label: 'Ball of yarn', click: () => send('command', { type: 'event', name: 'yarn' }) },
+        { label: 'Ball of yarn / tennis ball', click: () => send('command', { type: 'event', name: 'toy' }) },
+        { label: 'Laser pointer dot', click: () => send('command', { type: 'event', name: 'laser' }) },
+        { label: 'Toy mouse', click: () => send('command', { type: 'event', name: 'mouse' }) },
+        { label: 'Bird', click: () => send('command', { type: 'event', name: 'bird' }) },
+        { label: 'Doorbell', click: () => send('command', { type: 'event', name: 'visitor' }) },
       ],
     },
     { type: 'separator' },

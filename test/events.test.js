@@ -92,6 +92,7 @@ test('events are scheduled randomly and can be disabled', () => {
 test('dog: chases butterflies too, never climbs and soaks cleanly', () => {
   const s = withDirector({ seed: 5 });
   s.brain.setSpecies('dog', s.brain.U);
+  drive(s, 1.5);
   let climbing = false, bark = 0;
   s.director.trigger('butterfly');
   drive(s, 600, () => {
@@ -101,4 +102,82 @@ test('dog: chases butterflies too, never climbs and soaks cleanly', () => {
   });
   assert.equal(climbing, false);
   assert.ok(bark >= 1);
+});
+
+function validPet(s) { assert.ok(s.brain.y <= s.world.floorY + 5 && s.brain.x >= 0 && s.brain.x <= s.world.width && Number.isFinite(s.brain.x + s.brain.y), `pos ${s.brain.x},${s.brain.y}`); }
+
+test('laser dot: pet chases it, pounces, and never catches it', () => {
+  let misses = 0, pounces = 0;
+  for (const seed of [1, 2, 3, 4]) {
+    const s = withDirector({ seed });
+    const l = s.director.trigger('laser');
+    s.director.timer = 1e9;
+    drive(s, 60, () => { for (const e of s.brain.events) if (e.type === 'miss') misses++; if (s.brain.anim.state === 'swat') pounces++; validPet(s); assert.ok(l.y <= s.world.floorY); });
+    assert.ok(l.done, 'laser switched off');
+  }
+  assert.ok(misses >= 4, `misses ${misses}`);
+  assert.ok(pounces > 0);
+});
+
+test('toy mouse: runs the floor, is stalked, escapes, leaves', () => {
+  let misses = 0;
+  for (const seed of [1, 2, 3]) {
+    const s = withDirector({ seed });
+    const m = s.director.trigger('mouse');
+    s.director.timer = 1e9;
+    let seenOnScreen = false;
+    drive(s, 90, () => { for (const e of s.brain.events) if (e.type === 'miss') misses++; if (m.x > 0 && m.x < s.world.width) seenOnScreen = true; validPet(s); });
+    assert.ok(seenOnScreen); assert.ok(m.done, 'mouse left the screen');
+  }
+  assert.ok(misses >= 3, `misses ${misses}`);
+});
+
+test('bird: flies over, may land on a window top, flushed by the pet, leaves', () => {
+  let landed = 0, flushed = 0;
+  for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+    const s = withDirector({ seed });
+    const b = s.director.trigger('bird');
+    s.director.timer = 1e9;
+    drive(s, 80, () => { if (b.state === 'perched') landed++; if (b.flushed) flushed++; validPet(s); });
+    assert.ok(b.done, `bird gone (seed ${seed})`);
+  }
+  assert.ok(landed > 0, 'at least one bird landed');
+  assert.ok(flushed > 0);
+});
+
+test('doorbell: dog runs to the door and barks, cat eyes it warily', () => {
+  const d = withDirector({ seed: 6 });
+  d.brain.setSpecies('dog', d.brain.U);
+  drive(d, 1.5);   // let it land first
+  d.director.trigger('visitor'); d.director.timer = 1e9;
+  let barks = 0, dingDog = 0;
+  drive(d, 25, () => { for (const e of d.brain.events) { if (e.type === 'bark') barks++; if (e.type === 'ding') dingDog++; } validPet(d); });
+  assert.ok(barks >= 3 && dingDog >= 1, `barks ${barks}`);
+  const c = withDirector({ seed: 6 });
+  c.director.trigger('visitor'); c.director.timer = 1e9;
+  let barksCat = 0, states = new Set();
+  drive(c, 25, () => { for (const e of c.brain.events) if (e.type === 'bark') barksCat++; states.add(c.brain.anim.state); validPet(c); });
+  assert.equal(barksCat, 0);
+});
+
+test('toys: dogs get a tennis ball, cats get yarn, and both are head-sized', () => {
+  const cat = withDirector({ seed: 2 });
+  const ev = cat.director.trigger('toy');
+  assert.equal(ev.kind, 'yarn');
+  assert.ok(ev.body.r < 0.1 * cat.brain.U, 'ball radius is small next to the pet');
+  const dog = withDirector({ seed: 2 });
+  dog.brain.setSpecies('dog', dog.brain.U);
+  assert.equal(dog.director.trigger('toy').kind, 'ball');
+});
+
+test('every event type can be triggered and finishes (cat and dog)', () => {
+  for (const sp of ['cat', 'dog']) for (const type of ['butterfly', 'toy', 'laser', 'mouse', 'bird', 'visitor']) {
+    const s = withDirector({ seed: 9 });
+    if (sp === 'dog') { s.brain.setSpecies('dog', s.brain.U); drive(s, 1.5); }
+    const ev = s.director.trigger(type);
+    assert.ok(ev, type);
+    s.director.timer = 1e9;
+    drive(s, 160, () => validPet(s));
+    assert.equal(s.director.active.length, 0, `${sp}/${type} finished`);
+  }
 });

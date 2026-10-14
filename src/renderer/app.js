@@ -12,7 +12,7 @@ import { MudLayer } from './overlay/mud.js';
 import { PropsLayer } from './overlay/props.js';
 import { CatSound } from './sound.js';
 import { EventDirector } from '../shared/sim/events.js';
-import { ButterflyView, YarnView } from './props/PropViews.js';
+import { ButterflyView, ToyView, MouseView, BirdView } from './props/PropViews.js';
 
 const { SPECIES } = speciesData;
 const PX_PER_UNIT = 480;
@@ -37,8 +37,7 @@ export class PetApp {
     this.world = new World({ width: W, height: H, floorY: display.floorY, catH: 0.32 * U });
     this.brain = new CatBrain({ world: this.world, rng: makeRng(seed), U, settings: this.settings, species: this.settings.species });
     this.director = new EventDirector({ world: this.world, brain: this.brain, rng: makeRng(((seed || 1) ^ 0x9e3779b9) >>> 0), enabled: this.settings.events !== false });
-    this.bfView = null;
-    this.yarnView = null;
+    this.views = {};     // lazily created 3D prop views, keyed by event type / toy kind
     this.applySettings(this.settings);
 
     this.cursor = { x: W / 2, y: H / 2 };
@@ -282,6 +281,8 @@ export class PetApp {
       else if (e.type === 'muddy') this.char.mud = 1;
       else if (e.type === 'meow') this.sound.meow(this.settings.size < 0.6 ? 1.15 : 1);
       else if (e.type === 'bark') this.sound.bark(this.settings.size < 0.6 ? 1.2 : 1);
+      else if (e.type === 'chatter') this.sound.chatter();
+      else if (e.type === 'ding') this.sound.ding();
       else if (e.type === 'purr') this.sound.purr(e.on);
     }
     this.brain.events.length = 0;
@@ -329,19 +330,27 @@ export class PetApp {
         this.catCanvas.style.transform = `translate3d(${Math.round(d.x - half)}px, ${Math.round(d.y - half)}px, 0)`;
         this.view.render(dt);
       }
-      this.props.draw(this.brain.time, this.props.puddle, this.brain.icons.bodies.values());
+      this.props.draw(this.brain.time, this.props.puddle, this.brain.icons.bodies.values(), {
+        laser: this.director.active.find((e) => e.type === 'laser'), visitor: this.director.active.find((e) => e.type === 'visitor'), U: this.S,
+      });
       this.renderEventProps();
     }
     this.updateExpiredPuddle();
   }
 
   renderEventProps() {
-    const bf = this.director.butterfly;
-    if (bf) (this.bfView ||= new ButterflyView()).update(bf, this.S);
-    else if (this.bfView) this.bfView.show(false);
-    const yarn = this.director.active.find((e) => e.type === 'yarn');
-    if (yarn) (this.yarnView ||= new YarnView()).update(yarn.body);
-    else if (this.yarnView) this.yarnView.show(false);
+    const used = new Set();
+    for (const ev of this.director.active) {
+      let key = ev.type, make = null, args = [];
+      if (ev.type === 'butterfly') { make = () => new ButterflyView(); args = [ev, this.S]; }
+      else if (ev.type === 'toy') { key = 'toy:' + ev.kind; make = () => new ToyView(ev.kind); args = [ev.body]; }
+      else if (ev.type === 'mouse') { make = () => new MouseView(); args = [ev, this.S]; }
+      else if (ev.type === 'bird') { make = () => new BirdView(); args = [ev, this.S]; }
+      if (!make) continue;      // laser dot and doorbell bubble live on the 2-D props canvas
+      used.add(key);
+      (this.views[key] ||= make()).update(...args);
+    }
+    for (const [k, v] of Object.entries(this.views)) if (!used.has(k)) v.show(false);
   }
 
   updateExpiredPuddle() {

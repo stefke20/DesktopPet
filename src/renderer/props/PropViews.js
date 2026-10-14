@@ -119,11 +119,13 @@ export class ButterflyView extends MiniView {
     }
   }
 
-  /** bf: Butterfly sim entity; U: px per unit; this.px covers ~0.55 units. */
+  /** bf: Butterfly sim entity; U: px per pet unit. Full wingspan ~ 0.2 U, about as wide as the pet's head. */
   update(bf, U) {
     this.build(bf.palette);
-    this.setPx(0.62 * U);
-    this.camera.left = -0.235; this.camera.right = 0.235; this.camera.top = 0.235; this.camera.bottom = -0.235;
+    const ppu = 0.48 * U;                    // px per butterfly-model unit (model wingspan ~0.42)
+    this.setPx(Math.max(0.3 * U, 40));
+    const half = this.px / ppu / 2;
+    this.camera.left = -half; this.camera.right = half; this.camera.top = half; this.camera.bottom = -half;
     this.camera.updateProjectionMatrix();
     const flap = 0.08 + 0.8 * (0.5 + 0.5 * Math.sin(bf.phase));
     for (const w of this.wings) w.flap.rotation.y = -w.side * flap;
@@ -150,35 +152,207 @@ function yarnTexture() {
   return t;
 }
 
-export class YarnView extends MiniView {
-  constructor() {
+function tennisTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#d7f03c'; g.fillRect(0, 0, 256, 128);
+  g.strokeStyle = '#fbfff0'; g.lineWidth = 9; g.lineCap = 'round';
+  for (const x0 of [64, 192]) { g.beginPath(); g.moveTo(x0 - 26, -4); g.bezierCurveTo(x0 + 18, 34, x0 + 18, 94, x0 - 26, 132); g.stroke(); }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** A rolling toy: ball of yarn (cats) or tennis ball (dogs). Sized from the physics body (head-sized). */
+export class ToyView extends MiniView {
+  constructor(kind) {
     super(2);
+    this.kind = kind;
     const geo = new THREE.SphereGeometry(0.34, 32, 24);
     this.ball = new THREE.Group();
-    const mesh = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ map: yarnTexture(), gradientMap: toonGradient() }));
-    const out = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: '#4a1a2c', side: THREE.BackSide }));
+    const tex = kind === 'ball' ? tennisTexture() : yarnTexture();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ map: tex, gradientMap: toonGradient() }));
+    const out = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: kind === 'ball' ? '#3a4a10' : '#4a1a2c', side: THREE.BackSide }));
     out.scale.setScalar(1.07);
-    // loose end of thread, curling away
-    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0.32, 0.1, 0.1), new THREE.Vector3(0.44, 0.0, 0.14), new THREE.Vector3(0.5, -0.12, 0.1), new THREE.Vector3(0.44, -0.2, 0.06)]);
-    const thread = new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.022, 6), new THREE.MeshToonMaterial({ color: '#ff6b8e', gradientMap: toonGradient() }));
-    const threadOut = new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.034, 6), new THREE.MeshBasicMaterial({ color: '#4a1a2c', side: THREE.BackSide }));
-    this.ball.add(mesh, out, thread, threadOut);
-    this.ball.rotation.x = 0.4;
+    this.ball.add(mesh, out);
+    if (kind !== 'ball') {   // loose end of thread, curling away
+      const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0.32, 0.1, 0.1), new THREE.Vector3(0.44, 0.0, 0.14), new THREE.Vector3(0.5, -0.12, 0.1), new THREE.Vector3(0.44, -0.2, 0.06)]);
+      this.ball.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.022, 6), new THREE.MeshToonMaterial({ color: '#ff6b8e', gradientMap: toonGradient() })));
+      this.ball.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 16, 0.034, 6), new THREE.MeshBasicMaterial({ color: '#4a1a2c', side: THREE.BackSide })));
+    }
     this.scene.add(this.ball);
-    this.mesh = mesh;
   }
 
   /** body: physics circle {x,y,r,ang}. */
   update(body) {
     this.setPx(body.r * 3.1);
-    const half = 0.5;   // scene units across half the canvas
-    this.camera.left = -half; this.camera.right = half; this.camera.top = half; this.camera.bottom = -half;
+    this.camera.left = -0.5; this.camera.right = 0.5; this.camera.top = 0.5; this.camera.bottom = -0.5;
     this.camera.updateProjectionMatrix();
-    // scene ball radius 0.34 -> body.r px: canvas of body.r*3.1 px spans 1 unit
-    const s = (body.r * 2) / (this.px * 0.68);
-    this.ball.scale.setScalar(s);
+    // a 1-unit-wide canvas is body.r*3.1 px; the model ball has radius 0.34 units -> scale to body.r px
+    this.ball.scale.setScalar((body.r * 2) / (this.px * 0.68));
     this.ball.rotation.set(0.4, 0, -body.ang);
     this.place(body.x, body.y);
+    this.show(true);
+    this.render();
+  }
+}
+
+// --------------------------------------------------------------------------- toy mouse
+export class MouseView extends MiniView {
+  constructor() {
+    super(2);
+    const fur = new THREE.MeshToonMaterial({ color: '#b7bac9', gradientMap: toonGradient() });
+    const belly = new THREE.MeshToonMaterial({ color: '#e6e8f0', gradientMap: toonGradient() });
+    const pink = new THREE.MeshBasicMaterial({ color: '#ff9fb3' });
+    const dark = new THREE.MeshBasicMaterial({ color: '#2c2e3a' });
+    const ol = new THREE.MeshBasicMaterial({ color: '#2c2e3a', side: THREE.BackSide });
+    this.root = new THREE.Group();
+    this.scene.add(this.root);
+    const add = (geo, mat, x, y, z, sx = 1, sy = 1, sz = 1, outline = 1.12) => {
+      const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); this.root.add(m);
+      if (outline) { const o = new THREE.Mesh(geo, ol); o.position.copy(m.position); o.scale.set(sx * outline, sy * outline, sz * outline); this.root.add(o); }
+      return m;
+    };
+    const sph = new THREE.SphereGeometry(1, 20, 14);
+    this.body = new THREE.Group(); this.root.add(this.body);
+    const grp = this.body;
+    const addTo = (g, geo, mat, x, y, z, sx, sy, sz, outline = 1.14) => {
+      const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.scale.set(sx, sy, sz); g.add(m);
+      if (outline) { const o = new THREE.Mesh(geo, ol); o.position.copy(m.position); o.scale.set(sx * outline, sy * outline, sz * outline); g.add(o); }
+    };
+    addTo(grp, sph, fur, 0, 0.07, 0, 0.115, 0.07, 0.065);                // body
+    addTo(grp, sph, belly, 0.0, 0.045, 0.012, 0.08, 0.04, 0.05, 0);     // belly patch
+    addTo(grp, sph, fur, 0.12, 0.085, 0, 0.065, 0.055, 0.05);             // head
+    addTo(grp, sph, pink, 0.178, 0.09, 0, 0.016, 0.014, 0.014, 1.2);      // nose
+    addTo(grp, sph, dark, 0.15, 0.105, 0.04, 0.008, 0.01, 0.008, 0);      // eye
+    for (const z of [0.035, -0.035]) {
+      addTo(grp, sph, fur, 0.095, 0.14, z, 0.028, 0.034, 0.012);           // ear
+      addTo(grp, sph, pink, 0.098, 0.14, z * 1.2, 0.017, 0.022, 0.006, 0);  // inner ear
+    }
+    // whiskers
+    for (const [dy, dz] of [[0.012, 0.045], [-0.004, 0.05]]) for (const sz of [1, -1]) {
+      const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(0.17, 0.09 + dy * 0.2, sz * 0.012), new THREE.Vector3(0.19, 0.095 + dy, sz * dz), new THREE.Vector3(0.2, 0.09 + dy * 0.5, sz * dz * 1.7)]);
+      grp.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 8, 0.0016, 4), dark));
+    }
+    // tail
+    this.tailPts = [];
+    this.tail = new THREE.Mesh(new THREE.BufferGeometry(), dark);
+    this.root.add(this.tail);
+    // legs
+    this.legs = [];
+    for (const [x, z] of [[0.07, 0.035], [0.07, -0.035], [-0.07, 0.035], [-0.07, -0.035]]) {
+      const leg = new THREE.Group(); leg.position.set(x, 0.045, z);
+      addTo(leg, sph, fur, 0, -0.03, 0, 0.026, 0.035, 0.022, 1.15);
+      this.root.add(leg); this.legs.push(leg);
+    }
+    void add;
+  }
+
+  update(m, U) {
+    const ppu = 0.62 * U;                         // model length ~0.33 -> ~0.2 U
+    this.setPx(Math.max(0.55 * U, 56));
+    const half = this.px / ppu / 2;
+    this.camera.left = -half; this.camera.right = half; this.camera.top = half; this.camera.bottom = -half;
+    this.camera.updateProjectionMatrix();
+    this.root.scale.x = m.facing >= 0 ? 1 : -1;
+    const moving = m.moving ? 1 : 0;
+    const bob = moving * Math.abs(Math.sin(m.phase)) * 0.012;
+    this.body.position.y = bob;
+    this.body.rotation.z = (m.state === 'pause' ? 0.12 : -0.03) + (m.state === 'dart' ? -0.08 : 0);
+    this.legs.forEach((l, i) => { l.rotation.z = moving * Math.sin(m.phase + (i % 2) * Math.PI + (i > 1 ? 1.5 : 0)) * 0.7; });
+    // wavy tail
+    const pts = [];
+    for (let i = 0; i <= 6; i++) { const t = i / 6; pts.push(new THREE.Vector3(-0.1 - t * 0.2, 0.07 + Math.sin(m.phase * 0.6 + t * 4) * 0.03 * t + t * 0.02, 0)); }
+    this.tail.geometry.dispose();
+    this.tail.geometry = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 12, 0.0065, 5);
+    // the model's feet are at scene y = -0.02, which must land on the floor line
+    this.place(m.x, m.y - 0.02 * ppu);
+    this.show(true);
+    this.render();
+  }
+}
+
+// --------------------------------------------------------------------------- bird
+const BIRDS = {
+  bluebird: { back: '#4aa3ff', belly: '#fff1d8', wing: '#2e72d6', beak: '#ffb02e', edge: '#13264a' },
+  robin: { back: '#8a6a4a', belly: '#ff7a3c', wing: '#6b4f35', beak: '#ffc23a', edge: '#3a2214' },
+  sparrow: { back: '#b98e5e', belly: '#f1e6cf', wing: '#8a6240', beak: '#f2a43a', edge: '#3a2a18' },
+};
+
+function wingShape() {
+  const s = new THREE.Shape();
+  s.moveTo(0, 0);
+  s.bezierCurveTo(0.02, 0.1, 0.1, 0.19, 0.2, 0.17);
+  s.bezierCurveTo(0.17, 0.1, 0.13, 0.04, 0.05, -0.01);
+  s.lineTo(0, 0);
+  return s;
+}
+
+export class BirdView extends MiniView {
+  constructor() {
+    super(30);
+    this.root = new THREE.Group();
+    this.scene.add(this.root);
+    this.built = null;
+  }
+
+  build(name) {
+    if (this.built === name) return;
+    this.built = name;
+    this.root.clear();
+    const pal = BIRDS[name] || BIRDS.bluebird;
+    const mat = (c) => new THREE.MeshToonMaterial({ color: c, gradientMap: toonGradient() });
+    const ol = new THREE.MeshBasicMaterial({ color: pal.edge, side: THREE.BackSide });
+    const sph = new THREE.SphereGeometry(1, 20, 14);
+    const part = (g, geo, color, x, y, z, sx, sy, sz, rz = 0, outline = 1.13) => {
+      const m = new THREE.Mesh(geo, typeof color === 'string' ? mat(color) : color); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.z = rz; g.add(m);
+      if (outline) { const o = new THREE.Mesh(geo, ol); o.position.copy(m.position); o.scale.set(sx * outline, sy * outline, sz * outline); o.rotation.z = rz; g.add(o); }
+    };
+    this.body = new THREE.Group(); this.root.add(this.body);
+    part(this.body, sph, pal.back, 0, 0, 0, 0.13, 0.085, 0.075);                   // body
+    part(this.body, sph, pal.belly, 0.02, -0.03, 0.012, 0.1, 0.055, 0.065, 0.15, 0);  // belly
+    part(this.body, sph, pal.back, 0.115, 0.065, 0, 0.058, 0.055, 0.052);          // head
+    const beak = new THREE.ConeGeometry(0.018, 0.05, 10);
+    part(this.body, beak, pal.beak, 0.18, 0.062, 0, 1, 1, 1, -Math.PI / 2, 1.15);   // beak
+    part(this.body, sph, '#15141c', 0.138, 0.078, 0.045, 0.011, 0.013, 0.01, 0, 0);  // eye
+    part(this.body, sph, '#ffffff', 0.141, 0.083, 0.052, 0.004, 0.004, 0.004, 0, 0); // eye glint
+    // tail
+    const tailG = new THREE.BoxGeometry(0.13, 0.03, 0.05);
+    part(this.body, tailG, pal.wing, -0.17, 0.0, 0, 1, 1, 1, 0.25, 1.15);
+    // legs (only visible when perched)
+    this.legs = new THREE.Group();
+    for (const z of [0.02, -0.02]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.05, 6), new THREE.MeshBasicMaterial({ color: pal.beak }));
+      leg.position.set(0.0, -0.1, z); this.legs.add(leg);
+    }
+    this.body.add(this.legs);
+    // wings: near one in front, far one behind
+    this.wings = [];
+    for (const [z, shade] of [[0.045, pal.wing], [-0.045, pal.wing]]) {
+      const w = new THREE.Group(); w.position.set(0.0, 0.03, z);
+      const g = new THREE.ShapeGeometry(wingShape(), 16);
+      part(w, g, shade, 0, 0, 0, 1, 1, 1, 0, 1.12);
+      this.body.add(w); this.wings.push(w);
+    }
+  }
+
+  update(bd, U) {
+    this.build(bd.palette);
+    const ppu = 0.9 * U;                       // model body ~0.27 -> ~0.24 U
+    this.setPx(Math.max(0.75 * U, 64));
+    const half = this.px / ppu / 2;
+    this.camera.left = -half; this.camera.right = half; this.camera.top = half; this.camera.bottom = -half;
+    this.camera.updateProjectionMatrix();
+    this.root.scale.x = bd.facing >= 0 ? 1 : -1;
+    const perched = bd.state === 'perched';
+    // flap: wings swing up and down about the shoulder; folded when perched
+    const a = perched ? -0.9 : Math.sin(bd.phase) * 1.0 + 0.2;
+    this.wings.forEach((w, i) => { w.rotation.z = a * (i === 0 ? 1 : 0.9); w.position.z = i === 0 ? 0.045 : -0.045; });
+    this.legs.visible = perched;
+    this.body.rotation.z = perched ? 0.18 : bd.state === 'takeoff' ? 0.35 : Math.sin(bd.phase) * -0.05;
+    this.body.position.y = perched ? 0.02 : 0;
+    this.place(bd.x, bd.y - (perched ? 0 : 0));
     this.show(true);
     this.render();
   }
