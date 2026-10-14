@@ -38,6 +38,7 @@ export class CatAnimator {
     this.facing = 1;
     this.yawCam = 0.35;          // 3D yaw toward camera (rad)
     this.yawCur = 0.35;
+    this.heading = -0.35;        // current Y rotation (turns through the camera)
     this.blink = { next: 2, t: -1 };
     this.earTwitch = { L: { next: 3, t: -1 }, R: { next: 5, t: -1 } };
     this.look = { yaw: 0, pitch: 0, eyeYaw: 0, eyePitch: 0 };
@@ -398,7 +399,11 @@ export class CatAnimator {
     this.facing = face;
     const o = this.view.orient;
     o.rotation.order = 'ZYX';
-    o.rotation.y = face >= 0 ? -this.yawCur : Math.PI + this.yawCur;
+    // facing right: -yaw; facing left: -PI + yaw. Interpolating the raw angle
+    // makes the cat turn *through* the camera instead of flipping.
+    const goal = face >= 0 ? -this.yawCur : -Math.PI + this.yawCur;
+    this.heading += (goal - this.heading) * (1 - Math.exp(-9 * dt));
+    o.rotation.y = this.heading;
     this.view.mud = ctx.mud || 0;
 
     this.rig.apply(this.cur);

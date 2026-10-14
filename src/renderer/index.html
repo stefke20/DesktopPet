@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <title>DesktopPet</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; user-select: none; -webkit-user-select: none; font-family: 'Segoe UI', system-ui, sans-serif; }
+    canvas { position: fixed; left: 0; top: 0; pointer-events: none; }
+    #cat { will-change: transform; }
+    #hud { position: fixed; right: 18px; bottom: 70px; display: none; }
+    #reset {
+      all: unset; cursor: pointer; padding: 9px 16px; border-radius: 999px; font-size: 13px; font-weight: 600; color: #fff;
+      background: rgba(32, 36, 48, 0.86); box-shadow: 0 4px 16px rgba(0,0,0,0.3); backdrop-filter: blur(6px);
+    }
+    #reset:hover { background: rgba(60, 120, 255, 0.95); }
+  </style>
+</head>
+<body>
+  <canvas id="mud"></canvas>
+  <canvas id="props"></canvas>
+  <canvas id="cat"></canvas>
+  <div id="hud"><button id="reset" title="Put every desktop icon back where it was">↺ Reset desktop icons</button></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

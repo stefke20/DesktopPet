@@ -73,7 +73,8 @@ export class World {
     const S = [];
     const minW = this.catH * 0.9;
     // Floor (taskbar top / bottom of the work area): fully visible.
-    S.push({ id: 'floor', kind: 'floor', owner: 'floor', y: this.floorY, x1: 0, x2: this.width });
+    const edge = this.catH * 0.9;      // keep the cat's body on screen
+    S.push({ id: 'floor', kind: 'floor', owner: 'floor', y: this.floorY, x1: edge, x2: this.width - edge, ix1: 0, ix2: this.width });
     // Screen-side walls
     S.push({ id: 'wall:screen:L', kind: 'wall', owner: 'screen', x: 0, y1: 0, y2: this.floorY, side: 'L', open: 1 });
     S.push({ id: 'wall:screen:R', kind: 'wall', owner: 'screen', x: this.width, y1: 0, y2: this.floorY, side: 'R', open: -1 });

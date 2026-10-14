@@ -9,7 +9,7 @@
     "build": "node build.mjs",
     "start": "npm run build && electron .",
     "start:mock": "npm run build && electron . --mock",
-    "test": "node --test test/",
+    "test": "node --test \"test/*.test.js\"",
     "shots": "npm run build && node tools/screenshots.mjs",
     "pack": "npm run build && electron-builder --win"
   },
