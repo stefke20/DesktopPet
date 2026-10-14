@@ -1,0 +1,25 @@
+{
+  "name": "desktop-pet",
+  "version": "0.1.0",
+  "description": "A realistic 3D cat that lives on your desktop: walks along your windows, plays with your icons, jumps on text boxes and leaves muddy paw prints.",
+  "main": "src/main/main.js",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "npm run build && electron .",
+    "start:mock": "npm run build && electron . --mock",
+    "test": "node --test test/",
+    "shots": "npm run build && node tools/screenshots.mjs",
+    "pack": "npm run build && electron-builder --win"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^44.7.2",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.25.0",
+    "playwright-core": "^1.50.0",
+    "three": "^0.186.1"
+  },
+  "type": "module"
+}
