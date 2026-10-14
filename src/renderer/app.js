@@ -11,6 +11,8 @@ import { makeRng } from '../shared/sim/geometry.js';
 import { MudLayer } from './overlay/mud.js';
 import { PropsLayer } from './overlay/props.js';
 import { CatSound } from './sound.js';
+import { EventDirector } from '../shared/sim/events.js';
+import { ButterflyView, YarnView } from './props/PropViews.js';
 
 const { SPECIES } = speciesData;
 const PX_PER_UNIT = 480;
@@ -34,6 +36,9 @@ export class PetApp {
     const U = PX_PER_UNIT * this.settings.size * SPECIES[this.settings.species].scale;
     this.world = new World({ width: W, height: H, floorY: display.floorY, catH: 0.32 * U });
     this.brain = new CatBrain({ world: this.world, rng: makeRng(seed), U, settings: this.settings, species: this.settings.species });
+    this.director = new EventDirector({ world: this.world, brain: this.brain, rng: makeRng(((seed || 1) ^ 0x9e3779b9) >>> 0), enabled: this.settings.events !== false });
+    this.bfView = null;
+    this.yarnView = null;
     this.applySettings(this.settings);
 
     this.cursor = { x: W / 2, y: H / 2 };
@@ -95,6 +100,7 @@ export class PetApp {
       case 'reset-icons': this.dropAllIcons(); break;
       case 'poke': this.brain.poke(); break;
       case 'summon': this.brain.interrupt(this.summon()); break;
+      case 'event': this.director.trigger(c.name); break;
       default: break;
     }
   }
@@ -124,6 +130,7 @@ export class PetApp {
     this.view.setSizeFactor(f);
     this.brain.setScale(PX_PER_UNIT * f);
     Object.assign(this.brain.settings, this.settings);
+    if (this.director) this.director.enabled = this.settings.events !== false;
     this.sound.enabled = !!this.settings.sound;
     if (!this.settings.sound) this.sound.purr(false);
   }
@@ -306,6 +313,7 @@ export class PetApp {
     this.prevCursor = { x: c.x, y: c.y };
     this.mudLayer.dry(dt);
 
+    this.director.update(dt);
     this.brain.update(dt);
     this.syncIcons();
     const d = this.brain.descriptor;
@@ -322,8 +330,18 @@ export class PetApp {
         this.view.render(dt);
       }
       this.props.draw(this.brain.time, this.props.puddle, this.brain.icons.bodies.values());
+      this.renderEventProps();
     }
     this.updateExpiredPuddle();
+  }
+
+  renderEventProps() {
+    const bf = this.director.butterfly;
+    if (bf) (this.bfView ||= new ButterflyView()).update(bf, this.S);
+    else if (this.bfView) this.bfView.show(false);
+    const yarn = this.director.active.find((e) => e.type === 'yarn');
+    if (yarn) (this.yarnView ||= new YarnView()).update(yarn.body);
+    else if (this.yarnView) this.yarnView.show(false);
   }
 
   updateExpiredPuddle() {

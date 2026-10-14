@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const { Settings } = require('./settings.cjs');
 const { IconStore } = require('./icons-store.cjs');
 const { catIcon } = require('./png.cjs');
+const { SPECIES } = require('../shared/species.cjs');
 
 const argv = process.argv;
 const MOCK = argv.includes('--mock') || process.platform !== 'win32';
@@ -222,7 +223,6 @@ async function recoverIcons() {
 }
 
 // ---------------------------------------------------------------- tray
-const COATS = [['ginger', 'Ginger tabby'], ['tabby', 'Brown tabby'], ['grey', 'Grey tabby'], ['black', 'Black cat'], ['tuxedo', 'Tuxedo'], ['cream', 'Cream']];
 const SIZES = [['Small', 0.5], ['Medium', 0.7], ['Large', 0.95]];
 
 function applySettings(patch) {
@@ -237,13 +237,14 @@ function buildMenu() {
   const toggle = (label, key) => ({ label, type: 'checkbox', checked: !!s[key], click: (i) => applySettings({ [key]: i.checked }) });
   const menu = Menu.buildFromTemplate([
     { label: 'DesktopPet', enabled: false },
-    { label: 'Call the cat here', click: () => send('command', { type: 'summon' }) },
-    { label: s.paused ? 'Wake the cat up' : 'Let the cat sleep (pause)', click: () => applySettings({ paused: !s.paused }) },
+    { label: 'Call your pet here', click: () => send('command', { type: 'summon' }) },
+    { label: s.paused ? 'Wake your pet up' : 'Let your pet sleep (pause)', click: () => applySettings({ paused: !s.paused }) },
     { type: 'separator' },
     { label: '↺ Reset desktop icons   (Ctrl+Alt+R)', click: () => resetIcons(true) },
     { label: 'Clean muddy paw prints', click: () => send('command', { type: 'clear-prints' }) },
     { type: 'separator' },
-    { label: 'Coat', submenu: COATS.map(([id, label]) => ({ label, type: 'radio', checked: s.coat === id, click: () => applySettings({ coat: id }) })) },
+    { label: 'Companion', submenu: Object.values(SPECIES).map((sp) => ({ label: sp.label, type: 'radio', checked: s.species === sp.id, click: () => applySettings({ species: sp.id }) })) },
+    { label: `${SPECIES[s.species].label} coat`, submenu: SPECIES[s.species].coats.map(([id, label]) => ({ label, type: 'radio', checked: s.coats[s.species] === id, click: () => applySettings({ coats: { ...settings.get('coats'), [s.species]: id } }) })) },
     { label: 'Size', submenu: SIZES.map(([label, v]) => ({ label, type: 'radio', checked: Math.abs(s.size - v) < 0.01, click: () => applySettings({ size: v }) })) },
     {
       label: 'What the cat may do',
@@ -253,6 +254,15 @@ function buildMenu() {
         toggle('Chase the mouse cursor', 'chase'),
         toggle('Walk in mud (paw prints)', 'mud'),
         toggle('Take naps', 'sleep'),
+        toggle('Random events (butterflies, yarn ...)', 'events'),
+      ],
+    },
+    {
+      label: 'Surprise me',
+      submenu: [
+        { label: 'A random visitor', click: () => send('command', { type: 'event' }) },
+        { label: 'Butterfly', click: () => send('command', { type: 'event', name: 'butterfly' }) },
+        { label: 'Ball of yarn', click: () => send('command', { type: 'event', name: 'yarn' }) },
       ],
     },
     { type: 'separator' },

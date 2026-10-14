@@ -24,12 +24,33 @@ const adv = (sec, step = 1 / 60) => page.evaluate(([s, st]) => { for (let t = 0;
 const info = () => page.evaluate(() => { const b = window.app.brain; return { t: +b.time.toFixed(1), x: Math.round(b.x), y: Math.round(b.y), mode: b.mode, anim: b.anim.state, sup: b.support && b.support.id, mud: +b.mud.toFixed(2), prints: window.app.mudLayer.count, icons: b.icons.bodies.size, act: b.lastActivity }; });
 
 const scenarios = {
+  async butterfly() {
+    await page.evaluate(() => { const b = window.app.brain; b.settings.perch = false; b.settings.playWithIcons = false; b.settings.mud = false; b.cool.chase = 999; window.app.director.timer = 1e9; });
+    await page.evaluate(() => window.app.director.trigger('butterfly'));
+    const want = ['stand', 'walk', 'crouch', 'swat', 'jump', 'sit'];
+    const got = {}; let n = 0;
+    for (let i = 0; i < 400; i++) {
+      await adv(0.1);
+      const f = await page.evaluate(() => { const a = window.app, b = a.brain, bf = a.director.butterfly; return { t: +b.time.toFixed(1), anim: b.anim.state, x: Math.round(b.x), y: Math.round(b.y), bf: bf ? [Math.round(bf.x), Math.round(bf.y), bf.state, bf.dodges] : null }; });
+      if (i % 20 === 0) console.log(JSON.stringify(f));
+      if (f.bf && want.includes(f.anim) && (got[f.anim] || 0) < 2 && (f.anim !== 'stand' || (got.stand || 0) < 1)) { got[f.anim] = (got[f.anim] || 0) + 1; await shot(String(n++).padStart(2, '0') + '-' + f.anim); }
+      if (!f.bf) break;
+    }
+    console.log('captured', JSON.stringify(got));
+  },
+  async yarn() {
+    await page.evaluate(() => { const b = window.app.brain; b.settings.perch = false; b.settings.playWithIcons = false; b.settings.mud = false; window.app.director.timer = 1e9; });
+    await page.evaluate(() => window.app.director.trigger('yarn'));
+    let n = 0;
+    for (let i = 0; i < 60; i++) { await adv(0.5); if (i % 4 === 3) await shot(String(n++).padStart(2, '0')); }
+  },
   async soak() {
-    const res = await page.evaluate(() => {
+    const res = await page.evaluate((swapEvery) => {
       const a = window.app, b = a.brain, seen = {}, modes = {}, bad = [];
       let maxAir = 0, air = 0;
       for (let t = 0; t < 1800; t += 1 / 30) {
         // a wandering cursor, sometimes fast
+        if (swapEvery && Math.abs(t % swapEvery) < 1 / 30) a.applySettings({ species: a.settings.species === 'cat' ? 'dog' : 'cat' });
         const k = t * 0.7;
         window.__fake.cursor(640 + Math.sin(k) * 500 + Math.sin(k * 3.1) * 90, 360 + Math.cos(k * 0.8) * 250);
         a.tick(1 / 30, false);
@@ -44,7 +65,7 @@ const scenarios = {
         if (!Number.isFinite(b.x) || b.y > 700 || b.x < -5 || b.x > 1285) bad.push(`pos ${b.x.toFixed(0)},${b.y.toFixed(0)}@${t.toFixed(1)} mode=${b.mode} anim=${b.anim.state} act=${b.lastActivity} owner=${b.attach.owner} wall=${b.wall && b.wall.id} rotZ=${b.rotZ.toFixed(2)}`);
       }
       return { seen, modes, bad: bad.slice(0, 10), maxAir: +maxAir.toFixed(1), prints: a.mudLayer.count, parked: a.parked.size, bodies: b.icons.bodies.size };
-    });
+    }, Number(process.env.SWAP_EVERY || 0));
     console.log(JSON.stringify(res, null, 1));
   },
   async interact() {

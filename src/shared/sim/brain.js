@@ -18,6 +18,9 @@ export class CatBrain {
     this.traits = SPECIES[speciesId].traits;
     this.mp = motionParams(U, this.traits);
     this.icons = new IconField(world, this.mp);
+    this.toys = new IconField(world, this.mp);   // yarn balls and other event props
+    this.activeToy = null;
+    this.butterfly = null;
     this.settings = { playWithIcons: true, mud: true, perch: true, chase: true, sleep: true, ...settings };
 
     this.x = world.width * 0.5;
@@ -51,7 +54,7 @@ export class CatBrain {
 
   // ------------------------------------------------------------------ config
   setScale(U) {
-    this.U = U; this.mp = motionParams(U, this.traits); this.icons.setMotion(this.mp);
+    this.U = U; this.mp = motionParams(U, this.traits); this.icons.setMotion(this.mp); this.toys.setMotion(this.mp);
     this.world.catH = 0.32 * U;
   }
 
@@ -129,6 +132,7 @@ export class CatBrain {
     this.time += dt;
     for (const k in this.cool) this.cool[k] -= dt;
     this.icons.step(dt);
+    this.toys.step(dt);
     if (this.world.fullscreenActive) { this.hidden = true; return; }
     this.hidden = false;
     if (!Number.isFinite(this.x) || !Number.isFinite(this.y)) this._reset();
@@ -683,7 +687,7 @@ export class CatBrain {
     yield* this.wait(this.rng.range(0.8, 2), 'stand');
   }
 
-  *pounce(px, py) {
+  *pounce(px, py, { onSwipe = null } = {}) {
     const start = { x: this.x, y: this.y };
     const dir = Math.sign(px - this.x) || this.facing;
     const reach = clamp(Math.abs(px - this.x), 0.25 * this.U, 1.5 * this.U);
@@ -697,6 +701,7 @@ export class CatBrain {
       const py0 = this.y;
       this.x = lerp(start.x, end.x, u); this.y = lerp(start.y, end.y, u) - 4 * H * u * (1 - u);
       this.setAnim(u > 0.45 && u < 0.85 ? 'swat' : 'jump', { t: (u - 0.45) / 0.4, side: 'L' }, { vy: -(this.y - py0) / this.dt });
+      if (onSwipe && u >= 0.62) { onSwipe(); onSwipe = null; }
       yield;
     }
     const s = this.world.landingBelow(this.x, this.y - 40, this.y + 40);
@@ -761,7 +766,9 @@ export class CatBrain {
     return { icon: near[Math.min(near.length - 1, Math.floor(this.rng() * 3))] };
   }
 
-  *chaseIcon(b) {
+  *chaseIcon(b) { return yield* this.chaseBody(b, this.icons); }
+
+  *chaseBody(b, field = this.icons) {
     const s = this.world.supportAt(b.x, b.y + b.r, 14);
     if (s && this.support && s.id !== this.support.id) { const ok = yield* this.goTo(s.id); if (!ok) { b.ignoreUntil = this.time + 10; return false; } }
     if (this.support && (b.x < this.support.x1 - 0.4 * this.U || b.x > this.support.x2 + 0.4 * this.U)) { b.ignoreUntil = this.time + 10; return false; }
@@ -792,10 +799,10 @@ export class CatBrain {
     yield* this.swatAt(b.x, b.y, 'L', {
       dur: 0.6,
       onContact: () => {
-        if (!this.icons.has(b.name)) return;
+        if (!field.has(b.name)) return;
         if (Math.abs(b.x - this.x) < 1.1 * this.U) {
           const p = this.rng.range(0.9, 1.5) * this.U * 2.2;
-          this.icons.swat(b.name, dir * 0.94, -0.35, p);
+          field.swat(b.name, dir * 0.94, -0.35, p);
           this.events.push({ type: 'swat', name: b.name });
           done = true;
         }
@@ -902,6 +909,94 @@ export class CatBrain {
     // walk away across the floor leaving prints
     const far = clamp(this.x + dir * this.rng.range(2.5, 5) * this.U, 40, W - 40);
     yield* this.walkTo(far);
+    yield* this.wait(1.0, 'sit');
+  }
+
+  // ------------------------------------------------------------------ random events
+  /** A visitor arrived (butterfly, yarn ball ...). The pet may drop what it is doing. */
+  onEvent(ev) {
+    const busy = this.mode !== 'ground' || this.held || this.petting || this.iconSession;
+    if (busy) return;
+    const sleeping = this.anim.state === 'sleep';
+    if (sleeping && this.rng.chance(0.5)) return;       // sound asleep: ignores it
+    if (ev.type === 'butterfly') { this.butterfly = ev; this.interrupt(this.chaseButterfly(ev)); }
+    else if (ev.type === 'yarn') { this.interrupt(this.playWithBall(ev)); }
+  }
+
+  onEventEnd(ev) { if (this.butterfly === ev) this.butterfly = null; if (this.lookAt && this.lookAt.event === ev) this.lookAt = null; }
+
+  /** Chase a butterfly: stalk, pounce, miss. Always misses. */
+  *chaseButterfly(bf) {
+    const maxAttempts = this.rng.pick([2, 3, 3, 4]);
+    let attempts = 0, watch = 0;
+    this.events.push({ type: 'notice', what: 'butterfly' });
+    if (this.isDog) this.events.push({ type: 'bark' });
+    const look = () => { this.lookAt = { x: bf.x, y: bf.y, event: bf }; };
+    // freeze and stare for a moment
+    for (let t = 0; t < 0.9 && !bf.done; t += this.dt) { look(); this.setAnim('stand', { ears: 'alert', tail: 'question' }); yield; if (this.mode !== 'ground') return; }
+    while (!bf.done && attempts < maxAttempts && this.mode === 'ground' && this.support) {
+      look();
+      const s = this.support;
+      const dx = bf.x - this.x, rise = this.y - bf.y;
+      const m = 0.05 * this.U;
+      if (rise > this.mp.maxRise * 1.25 + 0.2 * this.U) {
+        // too high for a pounce right now: sit and follow it with the eyes
+        this.setAnim('sit', { ears: 'alert', tail: 'question' });
+        watch += this.dt; yield;
+        if (watch > 6) break;
+        continue;
+      }
+      watch = 0;
+      if (Math.abs(dx) > 0.95 * this.U) {
+        const dir = Math.sign(dx);
+        if (dir !== this.facing) yield* this.turn(dir);
+        const tx = clamp(bf.x - dir * 0.75 * this.U, s.x1 + m, s.x2 - m);
+        if (Math.abs(tx - this.x) < 6) { this.setAnim('crouch', { amount: 0.6 }); yield; watch += this.dt; if (watch > 5) break; continue; }
+        const sp = this.mp.run * (Math.abs(dx) > 2 * this.U ? 1 : 0.6);
+        this.x += Math.sign(tx - this.x) * Math.min(sp * this.dt, Math.abs(tx - this.x));
+        this.setAnim('walk', {}, { speed: sp });
+        yield;
+        continue;
+      }
+      // in range: crouch, wiggle, pounce -- the butterfly slips away at the last moment
+      const dir = Math.sign(dx) || this.facing;
+      if (dir !== this.facing) yield* this.turn(dir);
+      for (let t = 0, d = this.rng.range(0.6, 1.0); t < d && !bf.done; t += this.dt) { look(); this.setAnim('crouch', { wiggle: true, amount: 1 }); yield; }
+      if (bf.done || this.mode !== 'ground') break;
+      yield* this.pounce(bf.x, bf.y, { onSwipe: () => { bf.dodge(this.x + this.facing * 0.3 * this.U, this.y - 0.4 * this.U); this.events.push({ type: 'miss' }); } });
+      attempts++;
+      // "...it got away" moment
+      for (let t = 0; t < 1.1 && !bf.done; t += this.dt) { look(); this.setAnim('stand', { ears: 'back', tail: 'low' }); yield; if (this.mode !== 'ground') return; }
+    }
+    bf.leave();
+    // watch it go, then sulk a little
+    for (let t = 0; t < 2.6 && !bf.done && this.mode === 'ground'; t += this.dt) { look(); this.setAnim('sit', { ears: 'normal' }); yield; }
+    this.lookAt = null;
+    if (this.mode === 'ground') {
+      if (this.isDog) yield* this.wait(1.2, 'sit', { tail: 'low' }); else yield* this.wait(1.6, 'groom');
+    }
+  }
+
+  /** Bat a rolling ball of yarn around for a while. */
+  *playWithBall(ev) {
+    const b = ev.body;
+    this.events.push({ type: 'notice', what: 'yarn' });
+    const end = this.time + this.rng.range(18, 32);
+    this.activeToy = b;
+    let hits = 0;
+    while (this.time < end && hits < 14 && this.mode === 'ground' && this.toys.has(b.name) && !ev.done) {
+      const ok = yield* this.chaseBody(b, this.toys);
+      if (ok) hits++;
+      else {
+        // couldn't reach it (it's on another surface): wait a beat, then maybe give up
+        this.lookAt = { x: b.x, y: b.y, event: ev };
+        yield* this.wait(0.5, 'stand');
+        if (b.ignoreUntil > this.time) break;
+      }
+      yield* this.wait(this.rng.range(0.05, 0.3), 'stand');
+    }
+    this.activeToy = null;
+    this.lookAt = null;
     yield* this.wait(1.0, 'sit');
   }
 
