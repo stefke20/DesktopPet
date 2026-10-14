@@ -70,3 +70,12 @@ test('cat falls when its window disappears and lands on the floor', () => {
   assert.equal(brain.mode, 'ground');
   assert.ok(brain.y >= 440 || brain.y === world.floorY, `y=${brain.y}`);
 });
+
+test('regression: icons near the taskbar never send the cat below the floor', () => {
+  for (const seed of [1, 2, 3, 4, 5]) {
+    const { world, brain } = makeScene({ seed, icons: false });
+    world.setIcons([0, 1, 2].map((i) => ({ name: `low${i}`, x: 20, y: 930 - i * 20, w: 80, h: 90, ix: 36, iy: 930 - i * 20, iw: 48, ih: 48 })));
+    brain.cool.icons = 0; brain.settings.mud = false; brain.settings.perch = false; brain.settings.chase = false;
+    run(brain, 240, { each: () => assert.ok(brain.y <= world.floorY + 5, `seed ${seed}: y=${brain.y}`) });
+  }
+});

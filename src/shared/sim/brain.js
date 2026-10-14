@@ -123,6 +123,11 @@ export class CatBrain {
     try { r = this.task.next(); } catch (e) { console.error('[brain]', e); r = { done: true }; this._reset(); }
     if (r.done) this.task = this.life();
     this._ground();
+    // safety net: whatever happened, the cat never ends up below the floor
+    if (this.y > this.world.floorY + 4) {
+      this.y = this.world.floorY;
+      if (this.mode !== 'ground' && this.mode !== 'held') { this.mode = 'ground'; this.rotZ = 0; this.wall = null; this.attachTo('floor'); this.pending = this.life(); }
+    }
     this._look();
     this.x = clamp(this.x, 0, this.world.width);
   }
@@ -768,6 +773,19 @@ export class CatBrain {
     const h = stand.y - cy;
     const target = { x: cx - dir * 0.5 * this.U, y: cy + 0.05 * this.U };
     let launch = null;
+    if (h <= 0.5 * this.U) {
+      // low icon: just walk up to it and bat it from the ground
+      yield* this.walkTo(clamp(cx - dir * 0.55 * this.U, stand.x1 + 6, stand.x2 - 6));
+      if (this.mode !== 'ground') return false;
+      if (dir !== this.facing) yield* this.turn(dir);
+      let hit = false;
+      yield* this.swatAt(cx, cy, 'L', {
+        dur: 0.6,
+        onContact: () => { hit = true; this.icons.swat(ic.name, dir * 0.9, -0.3, this.rng.range(1.0, 1.5) * this.U * 2.2); this.events.push({ type: 'swat', name: ic.name }); },
+      });
+      this.lookAt = null;
+      return hit;
+    }
     if (h <= 1.25 * this.U) {
       yield* this.walkTo(clamp(target.x - dir * 0.2 * this.U, stand.x1 + 6, stand.x2 - 6), { run: false });
       if (this.mode !== 'ground') return false;
@@ -787,7 +805,7 @@ export class CatBrain {
     }
     // leap-swat toward the icon
     const start = { x: this.x, y: this.y };
-    const end = { x: target.x, y: target.y + (launch === 'wall' ? 0.45 * this.U : 0.55 * this.U) };
+    const end = { x: target.x, y: Math.min(target.y + (launch === 'wall' ? 0.45 * this.U : 0.55 * this.U), this.world.floorY - 0.1 * this.U) };
     const { H, T } = arc(start, end, this.mp, 0.12 * this.U);
     this.mode = 'air';
     const leapDir = Math.sign(cx - this.x) || dir;

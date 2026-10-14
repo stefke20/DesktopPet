@@ -13,6 +13,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 720 }, dev
 page.on('console', (m) => { const t = m.text(); if (!t.includes('Failed to load resource')) console.log('[page]', t); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));
 await page.addInitScript({ path: path.resolve('tools/lib/fakehost.js') });
+if (process.env.SEED) await page.addInitScript(`(() => { let a = ${Number(process.env.SEED)}; Math.random = () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();`);
 await page.goto(`http://127.0.0.1:${srv.port}/index.html`);
 await page.waitForFunction(() => window.app, null, { timeout: 60000 });
 await page.evaluate(() => { window.app.running = false; });
@@ -22,6 +23,29 @@ const adv = (sec, step = 1 / 60) => page.evaluate(([s, st]) => { for (let t = 0;
 const info = () => page.evaluate(() => { const b = window.app.brain; return { t: +b.time.toFixed(1), x: Math.round(b.x), y: Math.round(b.y), mode: b.mode, anim: b.anim.state, sup: b.support && b.support.id, mud: +b.mud.toFixed(2), prints: window.app.mudLayer.count, icons: b.icons.bodies.size, act: b.lastActivity }; });
 
 const scenarios = {
+  async soak() {
+    const res = await page.evaluate(() => {
+      const a = window.app, b = a.brain, seen = {}, modes = {}, bad = [];
+      let maxAir = 0, air = 0;
+      for (let t = 0; t < 1800; t += 1 / 30) {
+        // a wandering cursor, sometimes fast
+        const k = t * 0.7;
+        window.__fake.cursor(640 + Math.sin(k) * 500 + Math.sin(k * 3.1) * 90, 360 + Math.cos(k * 0.8) * 250);
+        a.tick(1 / 30, false);
+        for (const e of b.events) seen[e.type] = (seen[e.type] || 0) + 1;
+        seen['anim:' + b.anim.state] = (seen['anim:' + b.anim.state] || 0) + 1;
+        modes[b.mode] = (modes[b.mode] || 0) + 1;
+        if (b.mode === 'air') { air += 1 / 30; maxAir = Math.max(maxAir, air); } else air = 0;
+        for (const n of ['head', 'pelvis', 'fpL', 'hmR', 'tail5']) {
+          const q = a.view.bones[n].quaternion, p = a.view.bones[n].position;
+          if (![q.x, q.y, q.z, q.w, p.x, p.y, p.z].every(Number.isFinite)) bad.push(`${n}@${t.toFixed(1)}`);
+        }
+        if (!Number.isFinite(b.x) || b.y > 700 || b.x < -5 || b.x > 1285) bad.push(`pos ${b.x.toFixed(0)},${b.y.toFixed(0)}@${t.toFixed(1)} mode=${b.mode} anim=${b.anim.state} act=${b.lastActivity} owner=${b.attach.owner} wall=${b.wall && b.wall.id} rotZ=${b.rotZ.toFixed(2)}`);
+      }
+      return { seen, modes, bad: bad.slice(0, 10), maxAir: +maxAir.toFixed(1), prints: a.mudLayer.count, parked: a.parked.size, bodies: b.icons.bodies.size };
+    });
+    console.log(JSON.stringify(res, null, 1));
+  },
   async interact() {
     // keep the cat still on the floor so we can poke at it
     await page.evaluate(() => { const b = window.app.brain; b.x = 640; b.y = 680; b.mode = 'ground'; b.attachTo('floor'); b.task = (function* () { while (true) { b.setAnim('stand'); yield; } })(); });
